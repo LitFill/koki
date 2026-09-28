@@ -1,0 +1,24 @@
+# Koka build output
+.koka/
+
+# Written by the dev shell on every `nix develop`
+koka.json
+
+# Nix
+result
+result-*
+
+# Compiled binaries
+koki
+test-bin
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*.backup
+
+# OS
+.DS_Store
+Thumbs.db
