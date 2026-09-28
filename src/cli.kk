@@ -230,9 +230,10 @@ fun dispatch(argv : list<string>) : io int
       (c.action)(p)
     }
 
-// `koki help` and `koki help <command>`. This is a command in its own right
-// rather than a special case in `dispatch`, so it shows up in the command list
-// and in tab completion like everything else.
+// `koki help` and `koki help <command>`. This is not in the command table:
+// printing the table would mean the table referred to itself, and Koka will
+// not let a value do that. `dispatch` routes to here directly, and
+// `help-groups` still lists it, so it reads as a command everywhere else.
 fun cmd-help(p : parsed) : io int
   match p.positional
     Nil -> {
@@ -240,9 +241,20 @@ fun cmd-help(p : parsed) : io int
       0
     }
     Cons(name, _) ->
-      match find-command(name)
-        Just(c) -> {
-          print-command-help(c)
-          0
-        }
-        Nothing -> unknown-command(name)
+      if name == "help" then {
+        (term-bold("koki help") ++ " — show help for a command").println
+        out-blank()
+        "Usage:".println
+        "  koki help [COMMAND]".println
+        out-blank()
+        "With no command it prints the overview; with one it prints that".println
+        "command's options.".println
+        0
+      } else {
+        match find-command(name)
+          Just(c) -> {
+            print-command-help(c)
+            0
+          }
+          Nothing -> unknown-command(name)
+      }

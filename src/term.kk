@@ -91,34 +91,13 @@ pub fun term-green(s : string) : io string
 pub fun term-yellow(s : string) : io string
   term-style(s, "\x1b[33m")
 
-pub fun term-blue(s : string) : io string
-  term-style(s, "\x1b[34m")
-
 pub fun term-cyan(s : string) : io string
   term-style(s, "\x1b[36m")
 
 pub fun term-style(s : string, codes : string) : io string
   if term-color() then codes ++ s ++ "\x1b[0m" else s
 
-// Remove every ANSI escape sequence from `s`. Used by `--no-color` output that
-// is destined for a file, and by the doctor report.
-pub fun term-strip(s : string) : string
-  strip-aux(s.list, [], False)
-
-fun strip-aux(cs : list<char>, acc : list<char>, in-esc : bool) : string
-  match cs
-    Nil -> acc.listchar/string
-    Cons(c, tl) ->
-      if c == '\x1b' then strip-aux(tl, acc, True)
-      elif in-esc && c == 'm' then strip-aux(tl, acc, False)
-      elif in-esc then strip-aux(tl, acc, True)
-      else strip-aux(tl, acc ++ [ c ], False)
-
 // ---------- status lines ----------
-
-// Print a line to stdout.
-pub fun out-line(s : string) : io ()
-  s.println
 
 // Print a blank line.
 pub fun out-blank() : io ()
