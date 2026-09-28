@@ -63,6 +63,28 @@ All three write a `flake.nix` that builds on Linux and macOS, on x86-64 and
 aarch64, with a dev shell that regenerates `koka.json` so editors and the Koka
 language server see the same modules the compiler will.
 
+## Interactive
+
+`koki init`, `koki new`, `koki add` and `koki remove` ask for what you did not
+say, offering the default in brackets:
+
+```console
+$ koki new game
+Project name [game]:
+Template (bin, lib, test) [bin]:
+Description [A Koka project]:
+Author [Anonymous]:
+License [MIT]:
+Version [0.1.0]:
+✔ created game (bin)
+```
+
+This happens only when stdin is a terminal. Piped or redirected, and on the
+first run under CI, koki takes the defaults instead of blocking on a question
+nobody is there to answer — and `--yes` says so explicitly. A yes/no question
+re-asks rather than guessing. Every prompt flushes before it waits, so the
+question is on screen before the program blocks.
+
 ## Dependencies
 
 A Koka library is just a flake output that says where its modules live. koki

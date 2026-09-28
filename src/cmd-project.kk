@@ -29,7 +29,7 @@ fun non-empty-dir(p : path) : io bool
 
 fun this-year() : io string
   match run-system-read("date +%Y")
-    Ok(s) -> str-last(s.str-lines, "")
+    Ok(s) -> last(s.str-lines).default("")
     Error(_) -> "2026"
 
 // ---------- init ----------
@@ -100,7 +100,7 @@ fun emit-all(root : path, files : list<newfile>, dry : bool) : io bool
     }
 
 pub fun cmd-init(p : parsed) : io int
-  val dir = str-last(p.positional, ".")
+  val dir = last(p.positional).default(".")
   val root = dir.path
   val a = ask-missing(p, dir)
   val name = a.name
@@ -172,8 +172,8 @@ pub fun cmd-new(p : parsed) : io int
     out-hint("for example: koki new my-app")
     return 2
   }
-  val name = str-last(p.positional, "")
-  val dir = nth(p.positional, 1, name)
+  val name = last(p.positional).default("")
+  val dir = p.positional.@index(1).default(name)
   cmd-init(set-opt(set-positional(p, [ dir ]), "name", Just(name)))
 
 // ---------- add ----------

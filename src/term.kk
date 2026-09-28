@@ -26,9 +26,11 @@ val color-cache : ref<global, maybe<bool>> = unsafe-total { ref(Nothing) }
 val tty-cache : ref<global, maybe<bool>> = unsafe-total { ref(Nothing) }
 
 // Ask the shell whether file descriptor `fd` is attached to a terminal.
+// `test -t` says yes by exiting zero and printing nothing, so the answer is
+// the exit status, not the output.
 fun fd-is-tty(fd : string) : io bool
   match run-system-read("test -t " ++ fd)
-    Ok(s) -> s.is-notempty
+    Ok(_) -> True
     Error(_) -> False
 
 fun resolve-color() : io bool
@@ -142,26 +144,49 @@ fun read-line() : io string
     Ok(s) -> s.trim
     Error(_) -> ""
 
+// A prompt ends without a newline, so it sits in stdout's buffer while the
+// program blocks on input and the user is looking at an apparently hung
+// process. Every prompt therefore flushes before it waits.
+fun ask-line(question : string, shown : string) : io string
+  (term-bold(question) ++ shown ++ ": ").print
+  flush-out()
+  read-line()
+
 // Ask a question, offering `dflt` as the value shown between brackets and
 // used when the user just presses enter.
 pub fun prompt-ask(question : string, dflt : string) : io string
   val shown = if dflt.is-empty then " " else (" [" ++ term-dim(dflt) ++ "] ")
-  (term-bold(question) ++ shown ++ ": ").print
-  val answer = read-line()
+  val answer = ask-line(question, shown)
   if answer.is-empty then dflt else answer
 
-// Ask a yes/no question. An empty answer takes `dflt`; anything that is not a
-// yes or a no re-asks. Koka has no `while` loop, hence the recursion.
-fun confirm-loop(question : string, shown : string, dflt : bool) : io bool
-  (term-bold(question) ++ " " ++ term-dim(shown) ++ ": ").print
-  val answer = read-line().to-lower
-  if answer == "y" || answer == "yes" then True
-  elif answer == "n" || answer == "no" then False
-  elif answer.is-empty then dflt
-  else {
-    out-detail("please answer 'y' or 'n'")
-    confirm-loop(question, shown, dflt)
-  }
+// Does this reply settle a yes/no question? An empty line settles it too — the
+// caller reads that as "take the default" — so only a reply that is neither a
+// yes nor a no leaves the question open.
+pub fun prompt-settles(answer : string) : bool
+  match answer
+    "y" -> True
+    "yes" -> True
+    "n" -> True
+    "no" -> True
+    "" -> True
+    _ -> False
 
+// Ask a yes/no question. An empty answer takes `dflt`; anything else that is
+// not a yes or a no re-asks. The loop turns on whether the question has been
+// answered, not on the answer, so that the empty string a fresh `var` holds is
+// not mistaken for the user pressing enter.
 pub fun prompt-confirm(question : string, dflt : bool) : io bool
-  confirm-loop(question, if dflt then "(Y/n)" else "(y/N)", dflt)
+  val shown = if dflt then "(Y/n)" else "(y/N)"
+  var answer := ""
+  var answered := False
+  while(fn() !answered, fn() {
+    answer := ask-line(question, " " ++ term-dim(shown)).to-lower
+    answered := prompt-settles(answer)
+    if !answered then out-detail("please answer 'y' or 'n'")
+  })
+  match answer
+    "y" -> True
+    "yes" -> True
+    "n" -> False
+    "no" -> False
+    _ -> dflt

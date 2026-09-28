@@ -49,7 +49,7 @@ pub fun lookup(key : string) : maybe<known>
 // The flake input attribute for a ref: the last path segment, normalised into
 // something Nix accepts as an identifier.
 pub fun nix-input(ref : string) : string
-  str-kebab(str-last(str-split-char(ref, '/'), ref))
+  str-kebab(last(str-split-char(ref, '/')).default(ref))
 
 // A dependency the user asked for, as (input, ref, attr, style).
 //

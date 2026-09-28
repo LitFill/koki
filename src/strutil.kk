@@ -3,10 +3,18 @@
  * Koka imports bring names in unqualified, so every export here is prefixed
  * with `str-` to keep call sites unambiguous and greppable.
  *
- * Everything below is written as plain recursion rather than as a `var`
- * mutated inside a `foreach` closure: the 3.2 compiler drops updates when a
- * closure that assigns to a captured `var` calls another closure that does the
- * same, which silently turns these helpers into no-ops.
+ * Most of these are the std library's building blocks spelled out, because the
+ * std versions do not quite fit: `str-split-char` drops empty fields where
+ * `sep/split` keeps them, and `str-quoted` wants a single quoted run rather
+ * than a list. Where the std version does fit, it is used instead of a local
+ * copy — `last`, `@index`, `filter-map`, `index-of` and `while` all appear
+ * here rather than a hand-rolled equivalent.
+ *
+ * The list-building helpers are accumulators threaded through a tail call
+ * rather than `var`s mutated inside a `foreach`: the 3.2 compiler drops
+ * updates when a closure that assigns to a captured `var` calls another
+ * closure that does the same, which silently turns such a helper into a
+ * no-op. `while` is fine — it is one closure, not two.
  */
 
 module src/strutil
@@ -38,44 +46,27 @@ pub fun str-ends-with(s : string, sfx : string) : bool
   if total < ss.length then False
   else s.list.drop(total - ss.length) == ss
 
+
+// ---------- extracting a field out of a line of Nix ----------
+
 // The text after the first occurrence of `needle`, or Nothing when it does not
 // occur. Used to pick a dependency's input name out of an expression, which
 // may have a prefix, a suffix, or both.
 pub fun str-after(s : string, needle : string) : div maybe<string>
-  after-aux(s.list, needle.list, 0)
-
-fun after-aux(cs : list<char>, needle : list<char>, skip : int) : div maybe<string>
-  val at = cs.drop(skip)
-  if at.take(needle.length) == needle then
-    Just(at.drop(needle.length).listchar/string)
-  elif skip >= cs.length then
-    Nothing
-  else
-    after-aux(cs, needle, skip + 1)
-
-// ---------- list helpers ----------
-
-// The last element, or `dflt` for an empty list.
-pub fun str-last(xs : list<a>, dflt : a) : a
-  match xs
-    Nil -> dflt
-    Cons(hd, tl) -> str-last(tl, hd)
-
-// The element at index `i`, or `dflt` when out of range.
-pub fun nth(xs : list<a>, i : int, dflt : a) : div a
-  match (i, xs)
-    (0, Cons(hd, _)) -> hd
-    (_, Cons(_, tl)) -> nth(tl, i - 1, dflt)
-    _ -> dflt
+  val cs = s.list
+  val nd = needle.list
+  val last-start = cs.length - nd.length
+  var skip := 0
+  while(fn() skip <= last-start && cs.drop(skip).take(nd.length) != nd, fn() {
+    skip := skip + 1
+  })
+  if skip > last-start then Nothing
+  else Just(cs.drop(skip + nd.length).listchar/string)
 
 // Everything before the first `q`, or Nothing when `q` does not occur.
 pub fun str-before(s : string, q : char) : maybe<string>
-  before-aux(s.list, q, [])
-
-fun before-aux(cs : list<char>, q : char, acc : list<char>) : maybe<string>
-  match cs
-    Nil -> Nothing
-    Cons(c, tl) -> if c == q then Just(acc.listchar/string) else before-aux(tl, q, acc ++ [ c ])
+  val at = s.list.index-of(fn(c) c == q)
+  if at < 0 then Nothing else Just(s.list.take(at).listchar/string)
 
 // The text between the first pair of `q` characters, or Nothing when the
 // string does not contain exactly one quoted run. Used to pull values out of
@@ -182,7 +173,7 @@ fun lev-aux(prev : list<int>, x : char, ys : list<char>, j : int,
   match ys
     Nil -> out
     Cons(y, tl) -> {
-      val above = nth(prev, j, 0)
+      val above = prev.@index(j).default(0)
       val cell = str-min(above + 1, str-min(left + 1, diag + (if x == y then 0 else 1)))
       lev-aux(prev, x, tl, j + 1, cell, above, out ++ [ cell ])
     }
@@ -196,7 +187,7 @@ fun index-row(n : int) : div list<int>
 
 fun distance-rows(xs : list<char>, ys : list<char>, prev : list<int>) : div int
   match xs
-    Nil -> str-last(prev, 0)
+    Nil -> last(prev).default(0)
     Cons(x, tl) -> distance-rows(tl, ys, lev-row(prev, x, ys))
 
 // Levenshtein distance, used for "did you mean ...?" suggestions.
@@ -227,13 +218,6 @@ fun closest-aux(cs : list<string>, word : string, best : maybe<string>, best-d :
 // the first candidate in the list.
 pub fun str-closest(word : string, candidates : list<string>) : div maybe<string>
   closest-aux(candidates, word, Nothing, 1_000_000)
-
-// The values of the `Just` entries, dropping the `Nothing`s.
-pub fun justs(xs : list<maybe<a>>) : list<a>
-  match xs
-    Nil -> []
-    Cons(Just(hd), tl) -> [ hd ] ++ justs(tl)
-    Cons(Nothing, tl) -> justs(tl)
 
 // ---------- shell ----------
 

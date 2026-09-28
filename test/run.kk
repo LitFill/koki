@@ -13,6 +13,7 @@ import src/project
 import src/registry
 import src/strutil
 import src/templates
+import src/term
 
 // A `main` that returns an int has its value printed; exit explicitly instead.
 extern exit-now(code : int) : io ()
@@ -82,9 +83,9 @@ fun strutil-checks() : div list<result>
     check("shell quoting protects a space", str-shquote("a b") == "'a b'"),
     check("shell quoting protects a quote", str-shquote("it's") == "'it'\\''s'"),
     check("shell join keeps arguments apart", str-shjoin([ "a", "b c" ]) == "a 'b c'"),
-    check("last of a list", str-last([ 1, 2, 3 ], 0) == 3),
-    check("last of an empty list", str-last([], 7) == 7),
-    check("justs keeps the present values", justs([ Just(1), Nothing, Just(3) ]) == [ 1, 3 ]),
+    check("last of a list", last([ 1, 2, 3 ]).default(0) == 3),
+    check("last of an empty list", last([] : list<int>).default(7) == 7),
+    check("filter-map drops the Nothings", filter-map([ Just(1), Nothing, Just(3) ], fn(x) x) == [ 1, 3 ]),
   ]
 
 // ---------- args ----------
@@ -123,6 +124,23 @@ fun arg-checks() : div list<result>
     check("set-opt with nothing removes it",
           set-opt(parse-args(demo-args, [ "--name", "a" ]), "name", Nothing).value("name") == Nothing),
   ]
+
+// ---------- prompts ----------
+
+// The classification a yes/no question turns on. It is worth pinning down: an
+// earlier version tested the *opposite* and seeded a fresh `var` with the
+// empty string, so the question settled itself before it was ever asked and
+// every confirmation was silently skipped.
+val term-checks : list<result> = [
+  check("yes settles", prompt-settles("y")),
+  check("the long form of yes settles", prompt-settles("yes")),
+  check("no settles", prompt-settles("n")),
+  check("the long form of no settles", prompt-settles("no")),
+  check("an empty line settles on the default", prompt-settles("")),
+  check("nonsense does not settle", !prompt-settles("maybe")),
+  check("a near miss does not settle", !prompt-settles("yep")),
+  check("whitespace does not settle", !prompt-settles("  ")),
+]
 
 // ---------- registry ----------
 
@@ -240,8 +258,8 @@ fun model-checks() : div list<result>
 // ---------- runner ----------
 
 fun main() : io ()
-  val rs = strutil-checks() ++ arg-checks() ++ registry-checks() ++ template-checks()
-             ++ model-checks()
+  val rs = strutil-checks() ++ arg-checks() ++ term-checks ++ registry-checks()
+             ++ template-checks() ++ model-checks()
   rs.foreach fn(r) {
     ((if r.ok then "ok    " else "FAIL  ") ++ r.name).println
   }
