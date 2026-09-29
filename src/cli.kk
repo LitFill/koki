@@ -10,7 +10,7 @@ import src/project
 import src/strutil
 import src/term
 
-pub val koki-version : string = "0.1.0"
+pub val koki-version : string = "0.1.1"
 
 // Options every command understands. They are merged into each command's own
 // table so `-h` and `--version` work wherever they are typed.

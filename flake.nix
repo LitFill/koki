@@ -43,7 +43,7 @@
       packages = forAllSystems (pkgs: system: {
         default = pkgs.stdenv.mkDerivation {
           pname = "koki";
-          version = "0.1.0";
+          version = "0.1.1";
           src = pkgs.lib.cleanSourceWith {
             src = self;
             filter = path: type:
@@ -65,7 +65,7 @@
           '';
 
           # `koki --version` reports this, so keep the two in step.
-          passthru.version = "0.1.0";
+          passthru.version = "0.1.1";
 
           meta = {
             description = "koki — the Koka project manager";
@@ -101,7 +101,7 @@
       checks = forAllSystems (pkgs: system: {
         tests = pkgs.stdenv.mkDerivation {
           pname = "koki-tests";
-          version = "0.1.0";
+          version = "0.1.1";
           src = pkgs.lib.cleanSourceWith {
             src = self;
             filter = path: type:
