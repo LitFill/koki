@@ -160,13 +160,18 @@ fun registry-checks() : div list<result>
     check("--library names the attribute", resolve("github:o/r", Nothing, Just("lib")).thd == "lib"),
     check("the input name is the last path segment", nix-input("github:LitFill/nel-kk") == "nel-kk"),
     check("an input name is normalised", nix-input("github:o/Some_Repo") == "some-repo"),
-    check("a packages entry reaches share/koka", entry-for("x", "packages", "default").contains("/share/koka/")),
-    check("a packages entry is per system",
-          entry-for("x", "packages", "default").contains("pkgs.stdenv.hostPlatform.system")),
-    check("a kokaLibraries entry is per system",
-          entry-for("x", "kokaLibraries", "m").contains("kokaLibraries.")),
-    check("a kokaLibraries entry ends at includePath",
-          entry-for("x", "kokaLibraries", "m").contains(".includePath")),
+    // Pinned as whole expressions rather than substrings: these strings are
+    // written into the user's flake.nix, and a mangled interpolation — a `$`
+    // where a `/` belongs, a stray `}` — is still "contains /share/koka/".
+    check("a packages entry is exact",
+          entry-for("x", "packages", "default")
+            == "\"" ++ nix-dollar ++ "{self.inputs.x.packages."
+               ++ nix-dollar ++ "{pkgs.stdenv.hostPlatform.system}.default}"
+               ++ "/share/koka/" ++ nix-dollar ++ "{pkgs.koka.version}\""),
+    check("a kokaLibraries entry is exact",
+          entry-for("x", "kokaLibraries", "m")
+            == "self.inputs.x.kokaLibraries." ++ nix-dollar
+               ++ "{pkgs.stdenv.hostPlatform.system}.m.includePath"),
   ]
 
 // ---------- templates ----------
@@ -265,6 +270,12 @@ fun model-checks() : div list<result>
     check("the second dependency has its own input", with-two-text().contains("github:koka-community/html")),
     check("a packages-style entry is recognised as a dependency",
           with-two().flake-deps.any(fn(d) d.input-name == "html")),
+    // The line that actually lands in flake.nix, whole, as written.
+    check("the written packages entry is exact",
+          with-two-text().contains(
+            "        \"" ++ nix-dollar ++ "{self.inputs.html.packages."
+              ++ nix-dollar ++ "{pkgs.stdenv.hostPlatform.system}.default}"
+              ++ "/share/koka/" ++ nix-dollar ++ "{pkgs.koka.version}\"")),
     check("both dependencies survive together",
           with-two().flake-deps.length == 2 && with-two-text().contains("kokaLibraries")),
   ]

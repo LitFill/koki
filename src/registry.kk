@@ -41,7 +41,7 @@ pub fun entry-for(input : string, style : string, attr : string) : string
     "self.inputs." ++ input ++ ".kokaLibraries." ++ d ++ "{pkgs.stdenv.hostPlatform.system}." ++ attr ++ ".includePath"
   else
     "\"" ++ d ++ "{self.inputs." ++ input ++ ".packages." ++ d ++ "{pkgs.stdenv.hostPlatform.system}."
-      ++ attr ++ "}" ++ d ++ "/share/koka/" ++ d ++ "{pkgs.koka.version}}\""
+      ++ attr ++ "}/share/koka/" ++ d ++ "{pkgs.koka.version}\""
 
 pub fun lookup(key : string) : maybe<known>
   known-libs.find fn(k) k.name == key
