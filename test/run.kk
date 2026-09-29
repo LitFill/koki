@@ -9,6 +9,7 @@
 module test/run
 
 import src/args
+import src/cmd-project
 import src/project
 import src/registry
 import src/strutil
@@ -280,11 +281,33 @@ fun model-checks() : div list<result>
           with-two().flake-deps.length == 2 && with-two-text().contains("kokaLibraries")),
   ]
 
+// ---------- removing a dependency ----------
+//
+// `koki add` derives an input name from whatever spelling it is given, so the
+// name a dependency is filed under is not the name the user typed. Removal has
+// to land on that same name, or a dependency added as `LitFill/nel-kk` cannot
+// be removed by the name it was added with.
+
+fun remove-checks() : io list<result>
+  val base = render-flake(demo)
+  val added = flake-add(parse-or-die(base), "nel-kk", "github:LitFill/nel-kk",
+                        entry-for("nel-kk", "packages", "default"))
+  [
+    check("a dependency added by full ref is removable by full ref",
+          apply-removes(added, [ "LitFill/nel-kk" ], [], []).snd == [ "LitFill/nel-kk" ]),
+    check("a dependency added by full ref is removable by bare name",
+          apply-removes(added, [ "nel-kk" ], [], []).snd == [ "nel-kk" ]),
+    check("removal by full ref restores the file exactly",
+          apply-removes(added, [ "LitFill/nel-kk" ], [], []).fst == base),
+    check("a dependency that is not there is reported missing",
+          apply-removes(added, [ "nope" ], [], []).thd == [ "nope" ]),
+  ]
+
 // ---------- runner ----------
 
 fun main() : io ()
   val rs = strutil-checks() ++ arg-checks() ++ term-checks ++ registry-checks()
-             ++ template-checks() ++ model-checks()
+             ++ template-checks() ++ model-checks() ++ remove-checks()
   rs.foreach fn(r) {
     ((if r.ok then "ok    " else "FAIL  ") ++ r.name).println
   }

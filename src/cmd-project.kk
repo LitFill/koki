@@ -272,19 +272,24 @@ pub val remove-args : list<argdef> = [
   arg-switch("yes", "y", "do not ask for confirmation"),
 ]
 
-fun apply-removes(text : string, names : list<string>, done : list<string>, missing : list<string>)
+pub fun apply-removes(text : string, names : list<string>, done : list<string>, missing : list<string>)
     : io (string, list<string>, list<string>)
   match names
     Nil -> return (text, done, missing)
     Cons(n, tl) -> {
+      // `koki add` files a dependency under the name `resolve` derives from
+      // the spelling the user typed, so `koki add LitFill/nel-kk` lands as the
+      // input `nel-kk`. Resolving the same way here is what makes the name a
+      // dependency was added with also the name it can be removed with.
+      val input = resolve(n, Nothing, Nothing).fst
       val f = match parse-flake(text)
         Nothing -> {
           out-error("flake.nix stopped being parseable partway through; nothing was written")
           return (text, done, missing ++ [ n ])
         }
         Just(x) -> x
-      if f.flake-has(n) then
-        apply-removes(flake-remove(f, n), tl, done ++ [ n ], missing)
+      if f.flake-has(input) then
+        apply-removes(flake-remove(f, input), tl, done ++ [ n ], missing)
       else
         apply-removes(text, tl, done, missing ++ [ n ])
     }
@@ -304,8 +309,10 @@ pub fun cmd-remove(p : parsed) : io int
   val base = match parse-flake(text)
     Nothing -> return fail("flake.nix is not a koki project", "the koki marker regions are missing")
     Just(f) -> f
+  // Resolved the same way `apply-removes` resolves, so the listing agrees with
+  // what actually gets removed.
   p.positional.foreach fn(n) {
-    if base.flake-has(n) then out-item("remove  " ++ term-bold(n))
+    if base.flake-has(resolve(n, Nothing, Nothing).fst) then out-item("remove  " ++ term-bold(n))
     else out-warn(n ++ " is not a dependency of this project")
   }
   if p.has("dry-run") then {
