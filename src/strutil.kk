@@ -19,33 +19,13 @@
 
 module src/strutil
 
-// ---------- numeric ----------
-
-pub fun str-min(a : int, b : int) : int
-  if a <= b then a else b
-
-pub fun str-max(a : int, b : int) : int
-  if a >= b then a else b
-
-// ---------- classification ----------
-
-pub fun str-is-alnum(c : char) : bool
-  (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
-
-pub fun str-is-upper(c : char) : bool
-  c >= 'A' && c <= 'Z'
-
 // ---------- predicates ----------
 
 pub fun str-starts-with(s : string, pfx : string) : bool
-  s.list.take(pfx.list.length) == pfx.list
+  s.starts-with(pfx).is-just
 
 pub fun str-ends-with(s : string, sfx : string) : bool
-  val ss = sfx.list
-  val total = s.list.length
-  if total < ss.length then False
-  else s.list.drop(total - ss.length) == ss
-
+  s.ends-with(sfx).is-just
 
 // ---------- extracting a field out of a line of Nix ----------
 
@@ -57,16 +37,16 @@ pub fun str-after(s : string, needle : string) : div maybe<string>
   val nd = needle.list
   val last-start = cs.length - nd.length
   var skip := 0
-  while(fn() skip <= last-start && cs.drop(skip).take(nd.length) != nd, fn() {
+  while { skip <= last-start && cs.drop(skip).take(nd.length) != nd }
     skip := skip + 1
-  })
+
   if skip > last-start then Nothing
-  else Just(cs.drop(skip + nd.length).listchar/string)
+  else Just(cs.drop(skip + nd.length).string)
 
 // Everything before the first `q`, or Nothing when `q` does not occur.
 pub fun str-before(s : string, q : char) : maybe<string>
-  val at = s.list.index-of(fn(c) c == q)
-  if at < 0 then Nothing else Just(s.list.take(at).listchar/string)
+  val at = s.list.index-of(_ == q)
+  if at < 0 then Nothing else Just(s.list.take(at).string)
 
 // The text between the first pair of `q` characters, or Nothing when the
 // string does not contain exactly one quoted run. Used to pull values out of
@@ -80,22 +60,31 @@ pub fun str-quoted(s : string, q : char) : maybe<string>
 
 // Split on a single separator character, dropping empty fields.
 pub fun str-split-char(s : string, sep : char) : list<string>
-  split-aux(s.list, sep, [], [])
+  split-aux(s.list, sep)
 
 // `out` is kept reversed and flipped once at the end, so building a list costs
 // one pass instead of one append per field.
-fun split-aux(cs : list<char>, sep : char, cur : list<char>, out : list<string>) : list<string>
+fun split-aux(
+  cs  : list<char>,
+  sep : char,
+  cur : list<char>   = [],
+  out : list<string> = []
+) : list<string>
   match cs
     Nil -> push-field(cur, out).reverse
     Cons(c, tl) ->
-      if c == sep then split-aux(tl, sep, [], push-field(cur, out))
-      else split-aux(tl, sep, cur ++ [ c ], out)
+      if   c == sep
+      then split-aux(tl, sep, [], push-field(cur, out))
+      else split-aux(tl, sep, cur ++ [c], out)
 
 fun push-field(cur : list<char>, out : list<string>) : list<string>
-  if cur == [] then out else [ cur.listchar/string ] ++ out
+  if cur == [] then out else [cur.string] ++ out
 
 // Split into lines, dropping the empty final field a trailing newline leaves
-// behind. Interior blank lines are preserved.
+// behind. Interior blank lines are preserved, and so is leading whitespace:
+// `str-lines` feeds the flake round trip, where `koki add` and `koki remove`
+// rewrite the file from these lines, so trimming here would silently reformat
+// a hand-edited `flake.nix`.
 pub fun str-lines(s : string) : list<string>
   val ls = s.lines
   match ls.reverse
@@ -107,19 +96,23 @@ pub fun str-lines(s : string) : list<string>
 // Split a human phrase into lowercase alphanumeric words: "Hello World",
 // "hello_world" and "helloWorld" all yield ["hello","world"].
 pub fun str-words(s : string) : list<string>
-  words-aux(s.list, [], [])
+  s.list.words-aux
 
-fun words-aux(cs : list<char>, cur : list<char>, out : list<string>) : list<string>
+fun words-aux(
+  cs  : list<char>,
+  cur : list<char>   = [],
+  out : list<string> = []
+) : list<string>
   match cs
     Nil -> flush-lower(cur, out).reverse
     Cons(c, tl) -> {
-      if !str-is-alnum(c) then words-aux(tl, [], flush-lower(cur, out))
-      elif str-is-upper(c) && cur != [] then words-aux(tl, [ c ], flush-lower(cur, out))
-      else words-aux(tl, cur ++ [ c ], out)
+      if !c.is-alpha-num then words-aux(tl, [], flush-lower(cur, out))
+      elif c.is-upper && !cur.is-empty then words-aux(tl, [c], flush-lower(cur, out))
+      else words-aux(tl, cur ++ [c], out)
     }
 
 fun flush-lower(cur : list<char>, out : list<string>) : list<string>
-  if cur == [] then out else [ cur.listchar/string.to-lower ] ++ out
+  if cur.is-empty then out else Cons(cur.string.to-lower, out)
 
 // "Hello World" -> "hello-world"
 pub fun str-kebab(s : string) : string
@@ -132,20 +125,20 @@ pub fun str-snake(s : string) : string
 // Strip leading and trailing dashes.
 fun trim-dashes-front(cs : list<char>) : list<char>
   match cs
-    Cons(c, tl) -> if c == '-' then trim-dashes-front(tl) else cs
-    Nil -> cs
+    Cons('-', tl) -> trim-dashes-front(tl)
+    _ -> cs
 
 fun trim-dashes-back(cs : list<char>) : list<char>
   match cs.reverse
-    Cons(c, tl) -> if c == '-' then tl.reverse else cs
-    Nil -> cs
+    Cons('-', tl) -> tl.reverse
+    _ -> cs
 
 pub fun str-trim-dashes(s : string) : string
-  trim-dashes-back(trim-dashes-front(s.list)).listchar/string
+  s.list.trim-dashes-front.trim-dashes-back.string
 
 // Everything after the first `n` characters.
-pub fun str-tail(s : string, n : int) : string
-  s.list.drop(n).listchar/string
+pub fun str-drop(s : string, n : int) : string
+  s.slice.drop(n).string
 
 // ---------- validation ----------
 
@@ -169,23 +162,22 @@ pub fun str-sanitize-name(s : string) : string
 // immediately to the left, `diag` the cell above and to the left; carrying them
 // through the recursion keeps every row linear.
 fun lev-aux(prev : list<int>, x : char, ys : list<char>, j : int,
-            left : int, diag : int, out : list<int>) : div list<int>
+            left : int, diag : int, out : list<int>) : list<int>
   match ys
     Nil -> out
-    Cons(y, tl) -> {
-      val above = prev.@index(j).default(0)
-      val cell = str-min(above + 1, str-min(left + 1, diag + (if x == y then 0 else 1)))
+    Cons(y, tl) ->
+      val above = prev[j].default(0)
+      val cell = min(above + 1, min(left + 1, diag + (if x == y then 0 else 1)))
       lev-aux(prev, x, tl, j + 1, cell, above, out ++ [ cell ])
-    }
 
-fun lev-row(prev : list<int>, x : char, ys : list<char>) : div list<int>
+fun lev-row(prev : list<int>, x : char, ys : list<char>) : list<int>
   lev-aux(prev, x, ys, 0, 0, 0, [])
 
 // The first row of the matrix: 0, 1, 2, ... n.
 fun index-row(n : int) : div list<int>
-  if n <= 0 then [ 0 ] else index-row(n - 1) ++ [ n ]
+  if n <= 0 then [0] else index-row(n - 1) ++ [n]
 
-fun distance-rows(xs : list<char>, ys : list<char>, prev : list<int>) : div int
+fun distance-rows(xs : list<char>, ys : list<char>, prev : list<int>) : int
   match xs
     Nil -> last(prev).default(0)
     Cons(x, tl) -> distance-rows(tl, ys, lev-row(prev, x, ys))
@@ -196,23 +188,23 @@ pub fun str-distance(a : string, b : string) : div int
   val ys = b.list
   // With an empty row or column the matrix degenerates, so answer directly
   // rather than walk a row that carries no information.
-  if ys == [] then xs.length
-  elif xs == [] then ys.length
+  if   ys.is-empty then xs.length
+  elif xs.is-empty then ys.length
   else distance-rows(xs, ys, index-row(ys.length))
 
 // A suggestion is only worth making when it is within a third of the word's
 // length, and never further than two edits.
 fun suggest-cutoff(word : string) : int
-  str-max(2, word.list.length / 3)
+  max(2, word.count / 3)
 
 fun closest-aux(cs : list<string>, word : string, best : maybe<string>, best-d : int) : div maybe<string>
   match cs
     Nil -> if best-d <= suggest-cutoff(word) then best else Nothing
-    Cons(c, tl) -> {
+    Cons(c, tl) ->
       val d = str-distance(word, c)
-      if d < best-d then closest-aux(tl, word, Just(c), d)
-      else closest-aux(tl, word, best, best-d)
-    }
+      if   d < best-d
+      then closest-aux(tl, word, Just(c),      d)
+      else closest-aux(tl, word, best,    best-d)
 
 // Pick the candidate closest to `word`, if any is close enough. Ties resolve to
 // the first candidate in the list.
@@ -222,19 +214,17 @@ pub fun str-closest(word : string, candidates : list<string>) : div maybe<string
 // ---------- shell ----------
 
 fun safe-char(c : char) : bool
-  str-is-alnum(c) || c == '-' || c == '_' || c == '.' || c == '/'
+  c.is-alpha-num || c == '-' || c == '_' || c == '.' || c == '/'
     || c == '=' || c == ':' || c == ',' || c == '+' || c == '@' || c == '%'
 
 fun all-safe(cs : list<char>) : bool
-  match cs
-    Nil -> True
-    Cons(c, tl) -> if safe-char(c) then all-safe(tl) else False
+  cs.all(_.safe-char)
 
 // Quote one argument for /bin/sh. Pass-through arguments reach a shell as one
 // joined string, so an argument containing a space or a quote has to be
 // protected here or `koki dev -- sh -c '...'` arrives as several words.
 pub fun str-shquote(s : string) : string
-  if all-safe(s.list) then s
+  if s.list.all-safe then s
   else "'" ++ s.replace-all("'", "'\\''") ++ "'"
 
 // Quote every argument and join them with single spaces.

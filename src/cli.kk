@@ -28,7 +28,6 @@ val global-args : list<argdef> = [
 fun mk(cmd-name : string, summary : string, defs : list<argdef>, action : parsed -> io int) : command
   Command(cmd-name, summary, defs, action)
 
-
 val commands : list<command> = [
   mk("init", "create a project in the current directory", init-args, cmd-init),
   mk("new", "create a project in a new directory", new-args, cmd-new),
@@ -52,7 +51,6 @@ val command-names : list<string> = commands.map(cmd-name-of)
 
 pub fun find-command(key : string) : maybe<command>
   commands.find(fn(c) c.name == key)
-
 
 // ---------- help ----------
 

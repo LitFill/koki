@@ -11,7 +11,6 @@ import std/os/env
 import std/os/process
 import std/os/readline
 
-
 // Koka's stdout is block-buffered when it is not a terminal, so a progress
 // line written just before a child process runs comes out *after* everything
 // the child printed. Nix inherits this process's stdout, so the buffer has to

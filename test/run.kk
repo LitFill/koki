@@ -73,7 +73,7 @@ fun strutil-checks() : div list<result>
     check("starts with", str-starts-with("nixpkgs.url", "nixpkgs.")),
     check("ends with", str-ends-with("a.nix", ".nix")),
     check("ends with handles a short string", !str-ends-with("nix", "a.nix")),
-    check("tail drops a prefix", str-tail("--name", 2) == "name"),
+    check("drop drops a prefix", str-drop("--name", 2) == "name"),
     check("before splits at the separator", str-before("a.b.c", '.') == Just("a")),
     check("before is nothing when absent", str-before("abc", '.') == Nothing),
     check("quoted reads a run", str-quoted("x.url = \"ref\";", '"') == Just("ref")),
@@ -226,6 +226,18 @@ fun with-two-text() : div string
 fun with-two() : div kflake
   parse-or-die(with-two-text())
 
+// A flake the user has touched by hand: blank lines above and below that the
+// template never emits. `str-lines` feeds the write path, so anything it trims
+// is dropped from the file the first time `koki add` or `koki remove` runs.
+fun hand-edited() : string
+  "\n" ++ render-flake(demo) ++ "\n"
+
+fun hand-edited-round-trip() : div string
+  val added = flake-add(parse-or-die(hand-edited()), "nel-kk",
+                        "github:LitFill/nel-kk",
+                        entry-for("nel-kk", "kokaLibraries", "nonempty"))
+  flake-remove(parse-or-die(added), "nel-kk")
+
 fun has-input(f : kflake, want : string) : div bool
   f.flake-input-refs.any fn(r) r.name == want
 
@@ -247,6 +259,8 @@ fun model-checks() : div list<result>
     check("a round trip leaves the rest of the file alone",
           after-remove-text().contains("mainProgram = \"demo-app\"")),
     check("a round trip restores the file exactly", after-remove-text() == render-flake(demo)),
+    check("a hand-edited flake round trips exactly",
+          hand-edited-round-trip() == hand-edited()),
     check("a second dependency is added too", with-two().flake-deps.length == 2),
     check("the second dependency has its own input", with-two-text().contains("github:koka-community/html")),
     check("a packages-style entry is recognised as a dependency",

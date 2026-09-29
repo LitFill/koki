@@ -11,7 +11,6 @@ import std/os/env
 import src/cli
 import src/term
 
-
 // A `main` that returns an int has its return value printed and then used as
 // the exit status. koki wants the status without the print, so `main` returns
 // unit and the status is set here.
