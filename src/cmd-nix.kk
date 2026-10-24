@@ -65,6 +65,80 @@ pub fun cmd-dev(p : parsed) : io int
 
 pub val dev-args : list<argdef> = []
 
+// ---------- the REPL ----------
+
+// `koka -p` opens the interactive compiler, but on its own it only sees the
+// project directory. A dependency is a set of modules under a Nix store path,
+// and the compiler only reads those when the directory is on its module path,
+// so the REPL needs the same `--include` flags the build phase uses or
+// `import` of anything `koki add` brought in fails. Those flags are read out
+// of the `koka.json` the dev shell's hook writes, so the REPL and the build
+// cannot drift apart about what a dependency is.
+
+val dquote : string = "\""
+
+// The contents of the first `[...]` in `s`, one entry per comma-separated
+// field with the quotes taken off. A list that is never closed yields what is
+// there rather than nothing.
+fun bracket-list(s : string) : div list<string>
+  val open : int = s.list.index-of(_ == '[')
+  if open < 0 then []
+  else
+    val rest : list<char> = s.list.drop(open + 1)
+    val close : int = rest.index-of(_ == ']')
+    val inner = if close < 0 then rest else rest.take(close)
+    str-split-char(inner.string, ',').map(unquote-field)
+
+// One `"..."` field. A field that is not quoted is kept as it stands, so a
+// hand-edited file still yields something the compiler can be pointed at.
+fun unquote-field(s : string) : div string
+  val t = s.trim
+  val cs = t.list
+  if cs.length >= 2 && str-starts-with(t, dquote) && str-ends-with(t, dquote) then
+    cs.drop(1).take(cs.length - 2).string.trim
+  else t
+
+// The include directories recorded in a `koka.json`. A file without the key
+// yields none rather than an error: the REPL is still worth opening, and a
+// module that cannot be found says more about the problem than this would.
+// An entry that is empty is dropped, because `koka` reads an empty
+// `--include` as "reset the module path", which would lose every directory
+// that came before it.
+pub fun include-dirs(text : string) : div list<string>
+  match str-after(text, "\"include_dirs\"")
+    Nothing -> []
+    Just(rest) -> bracket-list(rest).filter(_.is-notempty)
+
+// The compiler flags those directories turn into.
+pub fun include-args(text : string) : div list<string>
+  include-dirs(text).map(fn(d) "--include=" ++ d)
+
+// Enter the dev shell just to let its hook write `koka.json`, then read it
+// back. Only ever done when the file is missing, which is the first time a
+// project is opened and every time after is a plain read.
+fun prime-koka-json(root : path) : io list<string>
+  out-step("reading the project's include path")
+  nix-in(root, "develop --command true")
+  match read-if-there(root / "koka.json")
+    Nothing -> []
+    Just(t) -> include-args(t)
+
+pub fun cmd-repl(p : parsed) : io int
+  val root = match require-project()
+    Nothing -> return 1
+    Just(r) -> r
+  val includes = match read-if-there(root / "koka.json")
+    Nothing -> prime-koka-json(root)
+    Just(t) -> include-args(t)
+  // Whatever the user adds goes after the includes, so `koki repl --` reaches
+  // `koka` untouched; the REPL reads the same stdin the user is typing on.
+  val extra = p.positional ++ p.passthru
+  val tail = if extra.is-empty then "" else " " ++ str-shjoin(extra)
+  out-step("koka -p" ++ (if includes.is-empty then "" else " " ++ str-shjoin(includes)) ++ tail)
+  nix-in(root, "develop --command koka -p " ++ str-shjoin(includes) ++ tail)
+
+pub val repl-args : list<argdef> = []
+
 // ---------- reading facts out of Nix ----------
 
 // The version the flake would actually build. Nix is asked directly rather
@@ -81,7 +155,7 @@ fun built-version(root : path) : io maybe<string>
 // ---------- info ----------
 
 fun row(label : string, value : string) : io ()
-  ("  " ++ term-dim(label.pad-right(13)) ++ value).println
+  println("  " ++ term-dim(label.pad-right(13)) ++ value)
 
 fun nixpkgs-pin(f : kflake) : maybe<string>
   nixpkgs-ref(flake-input-refs(f))
@@ -94,9 +168,8 @@ fun nixpkgs-ref(refs : list<inputref>) : maybe<string>
 // The two lines `koki info` spends on each dependency: where it came from, and
 // the expression that puts it on the module path.
 fun show-dep(d : kdep) : io ()
-  ("  " ++ term-bold(d.input-name.pad-right(16)) ++ d.source).println
-  ("  " ++ term-dim(" ".repeat(16) ++ d.entry)).println
-
+  println("  " ++ term-bold(d.input-name.pad-right(16)) ++ d.source)
+  println("  " ++ term-dim(" ".repeat(16) ++ d.entry))
 
 pub fun cmd-info(p : parsed) : io int
   val root = match require-project()
@@ -150,7 +223,7 @@ fun render-checks(cs : list<check>) : io ()
       0 -> term-green("✔")
       1 -> term-yellow("!")
       _ -> term-red("✖")
-    (mark ++ " " ++ c.label).println
+    println(mark ++ " " ++ c.label)
     if !c.help.is-empty then out-hint(c.help)
   }
 

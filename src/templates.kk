@@ -412,6 +412,7 @@ fun readme-for(s : settings) : string
     "## Commands\n" ++
     "\n" ++
     "    koki dev        # nix develop, with koka and the include path set up\n" ++
+    "    koki repl       # the Koka REPL, with the dependencies on the path\n" ++
     "    koki run        # build and run the program\n" ++
     "    koki build      # nix build\n" ++
     "    koki check      # nix flake check\n" ++

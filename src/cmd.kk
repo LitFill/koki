@@ -22,7 +22,6 @@ pub struct command
 
 // ---------- running other tools ----------
 
-
 // Is `exe` on the PATH? `command -v` prints the path it found, so the output
 // is the answer rather than something to redirect away.
 pub fun have-exe(exe : string) : io bool
@@ -99,7 +98,7 @@ pub fun next-steps(steps : list<(string, string)>) : io ()
   steps.foreach-indexed fn(i, step) {
     val (what, cmd) = step
     val n = (i + 1).show
-    ("  " ++ term-cyan(n ++ ".") ++ "  " ++ what).println
-    ("      " ++ term-green(cmd)).println
+    println("  " ++ term-cyan(n ++ ".") ++ "  " ++ what)
+    println("      " ++ term-green(cmd))
   }
   out-blank()
