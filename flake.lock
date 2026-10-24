@@ -16,9 +16,44 @@
         "type": "github"
       }
     },
+    "nixpkgs_2": {
+      "locked": {
+        "lastModified": 1792502884,
+        "narHash": "sha256-IoNisKcGbUjdd45qCqywGMCYmZ5EnkxezvLII0FWwNA=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "02c087f3fe673c9e317f206a627cb6b910336dbe",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
     "root": {
       "inputs": {
-        "nixpkgs": "nixpkgs"
+        "nixpkgs": "nixpkgs",
+        "util-kk": "util-kk"
+      }
+    },
+    "util-kk": {
+      "inputs": {
+        "nixpkgs": "nixpkgs_2"
+      },
+      "locked": {
+        "lastModified": 1792785372,
+        "narHash": "sha256-1juImIJxky9LkT3gxjhhmZXglkY+Kq/Rv/PWmVHjAC4=",
+        "owner": "LitFill",
+        "repo": "util-kk",
+        "rev": "36d0b72f5911f970c2a6b0c36b92cc4e09f6981a",
+        "type": "github"
+      },
+      "original": {
+        "owner": "LitFill",
+        "repo": "util-kk",
+        "type": "github"
       }
     }
   },
