@@ -15,22 +15,19 @@ import std/os/readline
 // line written just before a child process runs comes out *after* everything
 // the child printed. Nix inherits this process's stdout, so the buffer has to
 // be emptied first.
-pub extern flush-out() : io ()
+pub extern flush-out() : console ()
   c  inline "fflush(stdout);"
   js inline ""
 
 // ---------- capability detection ----------
 
 val color-cache : ref<global, maybe<bool>> = unsafe-total { ref(Nothing) }
-val tty-cache : ref<global, maybe<bool>> = unsafe-total { ref(Nothing) }
 
 // Ask the shell whether file descriptor `fd` is attached to a terminal.
 // `test -t` says yes by exiting zero and printing nothing, so the answer is
 // the exit status, not the output.
 fun fd-is-tty(fd : string) : io bool
-  match run-system-read("test -t " ++ fd)
-    Ok(_) -> True
-    Error(_) -> False
+  run-system("test -t " ++ fd) == 0
 
 fun resolve-color() : io bool
   match get-env-value("KOKI_COLOR")
@@ -47,21 +44,17 @@ fun resolve-color() : io bool
 pub fun term-color() : io bool
   match !color-cache
     Just(b) -> return b
-    Nothing -> {
+    Nothing ->
       val b = resolve-color()
       color-cache := Just(b)
       return b
-    }
+
+// Asking the shell spawns a process, so the answer is computed at most once.
+val tty : delayed<io, bool> = delay{ fd-is-tty("0") }
 
 // Is stdin a terminal, i.e. may we ask the user questions?
 pub fun term-interactive() : io bool
-  match !tty-cache
-    Just(b) -> return b
-    Nothing -> {
-      val b = fd-is-tty("0")
-      tty-cache := Just(b)
-      return b
-    }
+  tty.force
 
 // Force the colour decision, for `--color` and `--no-color`.
 pub fun force-color(b : bool) : io ()
@@ -73,7 +66,7 @@ pub fun set-quiet(b : bool) : io ()
   quiet-cache := b
 
 pub fun term-quiet() : read<global> bool
-  !quiet-cache
+  (!quiet-cache)
 
 // ---------- styling ----------
 
@@ -101,41 +94,41 @@ pub fun term-style(s : string, codes : string) : io string
 // ---------- status lines ----------
 
 // Print a blank line.
-pub fun out-blank() : io ()
+pub fun out-blank() : console ()
   "".println
 
 // A neutral statement of fact: "  3 packages". Progress chatter is what
 // `--quiet` silences; results are not.
 pub fun out-item(s : string) : io ()
-  if !term-quiet() then ("  " ++ s).println
+  if !term-quiet() then println("  " ++ s)
 
 // Success: a green check.
 pub fun out-ok(s : string) : io ()
-  (term-green("✔") ++ " " ++ s).println
+  println(term-green("✔") ++ " " ++ s)
 
 // Progress or an action about to happen: a cyan arrow.
 pub fun out-step(s : string) : io ()
-  if !term-quiet() then (term-cyan("→") ++ " " ++ s).println
+  if !term-quiet() then println(term-cyan("→") ++ " " ++ s)
 
 // Something worth knowing but not fatal: a yellow bang.
 pub fun out-warn(s : string) : io ()
-  (term-yellow("!") ++ " " ++ s).println
+  println(term-yellow("!") ++ " " ++ s)
 
 // Secondary detail attached to the line above.
 pub fun out-detail(s : string) : io ()
-  if !term-quiet() then ("  " ++ term-dim(s)).println
+  if !term-quiet() then println("  " ++ term-dim(s))
 
 // A fatal problem. Always on stderr, always red, never colourless.
 pub fun out-error(s : string) : io ()
-  (term-red(term-bold("error")) ++ ": " ++ s).println
+  println(term-red(term-bold("error")) ++ ": " ++ s)
 
 // The remedy for the line above.
 pub fun out-hint(s : string) : io ()
-  ("  " ++ term-cyan("help") ++ ": " ++ s).println
+  println("  " ++ term-cyan("help") ++ ": " ++ s)
 
 // A titled block, used for `koki info` and the `next steps` footer.
 pub fun out-heading(s : string) : io ()
-  (term-bold(s)).println
+  println(term-bold(s))
 
 // ---------- prompts ----------
 fun read-line() : io string

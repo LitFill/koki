@@ -47,6 +47,7 @@ $ nix run github:LitFill/koki -- init
 | `koki run [ARGS...]` | build and run the program |
 | `koki check` | run the flake's checks |
 | `koki dev [COMMAND...]` | enter the development shell |
+| `koki repl [KOKA-OPTIONS...]` | open `koka -p` with the project's dependencies on the module path |
 | `koki info` | what koki knows about this project |
 | `koki doctor` | check the toolchain and the project |
 

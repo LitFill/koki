@@ -9,6 +9,7 @@
 module test/run
 
 import src/args
+import src/cmd-nix
 import src/cmd-project
 import src/project
 import src/registry
@@ -303,11 +304,56 @@ fun remove-checks() : io list<result>
           apply-removes(added, [ "nope" ], [], []).thd == [ "nope" ]),
   ]
 
+// ---------- the include path ----------
+//
+// `koki repl` turns the directories the dev shell recorded in `koka.json`
+// into the `--include` flags `koka -p` needs. A path mangled on the way
+// through is a module the REPL quietly cannot see, so these pin the exact
+// strings and not only how many there are.
+
+// The `koka.json` the dev shell's hook writes, in the shape it writes it.
+fun kokajson(dirs : list<string>) : string
+  "{\"include_dirs\":[" ++ dirs.map(fn(d) "\"" ++ d ++ "\"").join(",") ++ "]}"
+
+// A store path with the shapes that a naive parse would damage: dashes,
+// dots, slashes and a version that looks like a field separator.
+val store-dir : string = "/nix/store/3k4l-my.lib-0.1.0/share/koka/v3.2.9"
+
+fun repl-checks() : div list<result>
+  [
+    check("a project with no dependencies has no include path",
+          include-dirs(kokajson([])) == []),
+    check("no include path means no compiler flags",
+          include-args(kokajson([])) == []),
+    check("one dependency is read back",
+          include-dirs(kokajson([ store-dir ])) == [ store-dir ]),
+    check("several dependencies keep their order",
+          include-dirs(kokajson([ store-dir, "/nix/store/other-1.0" ]))
+            == [ store-dir, "/nix/store/other-1.0" ]),
+    check("the flag is the one the build phase uses",
+          include-args(kokajson([ store-dir ])) == [ "--include=" ++ store-dir ]),
+    check("each dependency gets its own flag",
+          include-args(kokajson([ "/a", "/b" ])) == [ "--include=/a", "--include=/b" ]),
+    check("a file with no include_dirs yields nothing",
+          include-dirs("{}") == []),
+    check("a file that is not the expected shape yields nothing",
+          include-dirs("not json at all") == []),
+    check("an unterminated list yields what is there",
+          include-dirs("{\"include_dirs\":[\"/a\",\"/b\"") == [ "/a", "/b" ]),
+    check("a hand-unquoted field is still usable",
+          include-dirs("{\"include_dirs\":[/a]}") == [ "/a" ]),
+    check("an empty entry does not reset the module path",
+          include-args("{\"include_dirs\":[\"\"]}") == []),
+    check("an empty entry does not lose the directories around it",
+          include-args("{\"include_dirs\":[\"\",\"" ++ store-dir ++ "\"]}")
+            == [ "--include=" ++ store-dir ]),
+  ]
+
 // ---------- runner ----------
 
 fun main() : io ()
   val rs = strutil-checks() ++ arg-checks() ++ term-checks ++ registry-checks()
-             ++ template-checks() ++ model-checks() ++ remove-checks()
+             ++ template-checks() ++ model-checks() ++ remove-checks() ++ repl-checks()
   rs.foreach fn(r) {
     ((if r.ok then "ok    " else "FAIL  ") ++ r.name).println
   }

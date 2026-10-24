@@ -15,42 +15,39 @@ pub val koki-version : string = "0.1.1"
 // Options every command understands. They are merged into each command's own
 // table so `-h` and `--version` work wherever they are typed.
 val global-args : list<argdef> = [
-  arg-switch("help", "h", "show help for this command"),
-  arg-switch("version", "V", "show the koki version"),
-  arg-switch("color", "", "force coloured output"),
-  arg-switch("no-color", "", "disable coloured output"),
-  arg-switch("quiet", "q", "print only results and problems"),
-  arg-switch("verbose", "v", "print more"),
+  arg-switch("help",     "h", "show help for this command"),
+  arg-switch("version",  "V", "show the koki version"),
+  arg-switch("color",    "",  "force coloured output"),
+  arg-switch("no-color", "",  "disable coloured output"),
+  arg-switch("quiet",    "q", "print only results and problems"),
+  arg-switch("verbose",  "v", "print more"),
 ]
 
 // ---------- the command table ----------
 
-fun mk(cmd-name : string, summary : string, defs : list<argdef>, action : parsed -> io int) : command
-  Command(cmd-name, summary, defs, action)
+val commands : list<command> =
+  val mk = Command
+  [ mk("init",   "create a project in the current directory", init-args,   cmd-init)
+  , mk("new",    "create a project in a new directory",       new-args,    cmd-new)
+  , mk("add",    "add Koka libraries as flake inputs",        add-args,    cmd-add)
+  , mk("remove", "remove dependencies added by `koki add`",   remove-args, cmd-remove)
 
-val commands : list<command> = [
-  mk("init", "create a project in the current directory", init-args, cmd-init),
-  mk("new", "create a project in a new directory", new-args, cmd-new),
-  mk("add", "add Koka libraries as flake inputs", add-args, cmd-add),
-  mk("remove", "remove dependencies added by `koki add`", remove-args, cmd-remove),
-  mk("build", "build the project with Nix", build-args, cmd-build),
-  mk("run", "build and run the program", run-args, cmd-run),
-  mk("check", "run the flake's checks", check-args, cmd-check),
-  mk("dev", "enter the development shell", dev-args, cmd-dev),
-  mk("info", "show what koki knows about this project", info-args, cmd-info),
-  mk("doctor", "check the toolchain and the project", doctor-args, cmd-doctor),
-]
+  , mk("build",  "build the project with Nix",                         build-args,  cmd-build)
+  , mk("run",    "build and run the program",                          run-args,    cmd-run)
+  , mk("check",  "run the flake's checks",                             check-args,  cmd-check)
+  , mk("dev",    "enter the development shell",                        dev-args,    cmd-dev)
+  , mk("repl",   "open the Koka REPL with the project's dependencies", repl-args,   cmd-repl)
+  , mk("info",   "show what koki knows about this project",            info-args,   cmd-info)
+  , mk("doctor", "check the toolchain and the project",                doctor-args, cmd-doctor)
+  ]
 
 // `help` is deliberately not in the table above: it needs the table to render
 // the table, and Koka will not let a value refer to itself through a function.
 // `dispatch` handles it directly instead, and `help-groups` still lists it.
-fun cmd-name-of(c : command) : string
-  c.name
-
-val command-names : list<string> = commands.map(cmd-name-of)
+val command-names : list<string> = commands.map(_.name)
 
 pub fun find-command(key : string) : maybe<command>
-  commands.find(fn(c) c.name == key)
+  commands.find(_.name == key)
 
 // ---------- help ----------
 
@@ -59,12 +56,13 @@ pub struct group
   title : string
   names : list<string>
 
-val help-groups : list<group> = [
-  Group("Creating a project", [ "init", "new" ]),
-  Group("Dependencies", [ "add", "remove" ]),
-  Group("Building", [ "build", "run", "check", "dev" ]),
-  Group("Information", [ "info", "doctor", "help" ]),
-]
+val help-groups : list<group> =
+  val mk = Group
+  [ mk("Creating a project", [ "init",  "new"                            ])
+  , mk("Dependencies",       [ "add",   "remove"                         ])
+  , mk("Building",           [ "build", "run",    "check", "dev", "repl" ])
+  , mk("Information",        [ "info",  "doctor", "help"                 ])
+  ]
 
 fun summary-of(key : string) : string
   match find-command(key)
@@ -75,38 +73,36 @@ fun help-row(key : string) : io string
   "  " ++ term-cyan(key.pad-right(10)) ++ summary-of(key)
 
 fun print-usage() : io ()
-  (term-bold("koki") ++ " " ++ koki-version ++ " — the Koka project manager").println
+  println(term-bold("koki") ++ " " ++ koki-version ++ " — the Koka project manager")
   out-blank()
   "A Koka project is a directory with a flake.nix. koki writes that file, keeps".println
   "its dependency list, and hands everything else to Nix.".println
   out-blank()
-  (term-bold("Usage:")).println
-  ("  " ++ term-cyan("koki") ++ " " ++ term-dim("<command>") ++ " " ++ term-dim("[options]")).println
+  term-bold("Usage:").println
+  println("  " ++ term-cyan("koki") ++ " " ++ term-dim("<command>") ++ " " ++ term-dim("[options]"))
   out-blank()
   print-groups()
-  (term-bold("Options:")).println
+  println(term-bold("Options:"))
   usage-text(global-args).println
   out-blank()
-  (term-bold("Examples:")).println
+  term-bold("Examples:").println
   example("koki init", "start a project here")
   example("koki new my-app", "start one in ./my-app")
   example("koki add nel-kk", "add a Koka library")
   example("koki run", "build it and run it")
   out-blank()
-  ("Run " ++ term-cyan("koki help <command>") ++ " for the options of one command.").println
+  println("Run " ++ term-cyan("koki help <command>") ++ " for the options of one command.")
 
 fun print-groups() : io ()
-  help-groups.foreach fn(g) {
-    (term-bold(g.title)).println
-    g.names.foreach fn(n) {
-      (help-row(n)).println
-    }
+  help-groups.foreach fn(g)
+    println(term-bold(g.title))
+    g.names.foreach fn(n)
+      println(help-row(n))
     out-blank()
-  }
 
 // One "  command          what it does" line, aligned across the block.
 fun example(cmd-text : string, what : string) : io ()
-  ("  " ++ term-cyan(cmd-text) ++ term-dim(" ".repeat(20 - cmd-text.list.length) ++ what)).println
+  println("  " ++ term-cyan(cmd-text) ++ term-dim(" ".repeat(20 - cmd-text.list.length) ++ what))
 
 // "  koki add <DEP>..." — the argument placeholder is dimmed, and a command
 // that takes no arguments gets no trailing space.
@@ -116,7 +112,7 @@ fun usage-line(c : command) : io string
   else "  koki " ++ c.name ++ " " ++ term-dim(sfx)
 
 fun print-command-help(c : command) : io ()
-  (term-bold("koki " ++ c.name) ++ " — " ++ c.summary).println
+  println(term-bold("koki " ++ c.name) ++ " — " ++ c.summary)
   out-blank()
   "Usage:".println
   usage-line(c).println
@@ -126,7 +122,7 @@ fun print-command-help(c : command) : io ()
     usage-text(c.args).println
   }
   out-blank()
-  (term-bold("Options common to every command:")).println
+  println(term-bold("Options common to every command:"))
   usage-text(global-args).println
 
 fun usage-suffix(name : string) : string
@@ -137,11 +133,12 @@ fun usage-suffix(name : string) : string
     "remove" -> "<DEP>..."
     "run" -> "[ARGS...]"
     "dev" -> "[COMMAND...]"
+    "repl" -> "[KOKA-OPTIONS...]"
     "help" -> "[COMMAND]"
     _ -> ""
 
 fun print-version() : io ()
-  ("koki " ++ koki-version).println
+  println("koki " ++ koki-version)
 
 // ---------- dispatch ----------
 
@@ -160,7 +157,7 @@ fun usage-error(c : command, p : parsed) : io int
     }
   }
   out-blank()
-  ("Usage: koki " ++ c.name ++ " " ++ term-dim(usage-suffix(c.name))).println
+  println("Usage: koki " ++ c.name ++ " " ++ term-dim(usage-suffix(c.name)))
   out-hint("run `koki help " ++ c.name ++ "` for the full list")
   2
 
@@ -210,7 +207,11 @@ fun dispatch(argv : list<string>) : io int
     print-usage()
     return 0
   }
-  if name == "help" then return cmd-help(parse-args(global-args, rest))
+  if name == "help" then {
+    val p = parse-args(global-args, rest)
+    apply-globals(p)
+    return cmd-help(p)
+  }
   match find-command(name)
     Nothing -> unknown-command(name)
     Just(c) -> {
@@ -240,7 +241,7 @@ fun cmd-help(p : parsed) : io int
     }
     Cons(name, _) ->
       if name == "help" then {
-        (term-bold("koki help") ++ " — show help for a command").println
+        println(term-bold("koki help") ++ " — show help for a command")
         out-blank()
         "Usage:".println
         "  koki help [COMMAND]".println

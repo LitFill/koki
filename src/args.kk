@@ -45,8 +45,8 @@ pub fun value(p : parsed, name : string) : maybe<string>
 // A switch is on when it was given and, for the tri-state options below, when
 // it was not explicitly turned off with `--no-<name>`.
 pub fun flag-on(p : parsed, name : string, default : bool) : bool
-  if p.has("no-" ++ name) then False
-  elif p.has(name) then True
+  if   p.has("no-" ++ name) then False
+  elif p.has(name)          then True
   else default
 
 // A copy of `p` with the arguments after the command replaced. Used by
@@ -197,7 +197,7 @@ fun long-col(d : argdef) : string
 
 // Render the option table for a command, aligned in two columns.
 pub fun usage-text(defs : list<argdef>) : string
-  val width = maximum(defs.map fn(d) count(d.short-col ++ d.long-col), 20)
+  val width = maximum(defs.map fn(d) count(d.short-col ++ d.long-col), default=20)
   defs.map fn(d)
     "  " ++ (d.short-col ++ d.long-col).pad-right(width) ++ "  " ++ d.help
   .join("\n")
