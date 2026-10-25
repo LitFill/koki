@@ -2,6 +2,8 @@
 
 module src/cli
 
+import util
+
 import src/args
 import src/cmd
 import src/cmd-nix
@@ -70,72 +72,72 @@ fun summary-of(key : string) : string
     Nothing -> "show this help"
 
 fun help-row(key : string) : io string
-  "  " ++ term-cyan(key.pad-right(10)) ++ summary-of(key)
+  "  " ++ cyan(key.pad-right(10)) ++ summary-of(key)
 
 fun print-usage() : io ()
-  println(term-bold("koki") ++ " " ++ koki-version ++ " — the Koka project manager")
+  println("%1 %2 — the Koka project manager"%^["koki".bold, koki-version])
   out-blank()
   "A Koka project is a directory with a flake.nix. koki writes that file, keeps".println
   "its dependency list, and hands everything else to Nix.".println
   out-blank()
-  term-bold("Usage:").println
-  println("  " ++ term-cyan("koki") ++ " " ++ term-dim("<command>") ++ " " ++ term-dim("[options]"))
+  "Usage:".bold.println
+  println("  %1 %2 %3"%^["koki".cyan, "<command>".dim, "[options]".dim])
   out-blank()
   print-groups()
-  println(term-bold("Options:"))
+  "Options:".bold.println
   usage-text(global-args).println
   out-blank()
-  term-bold("Examples:").println
-  example("koki init", "start a project here")
+  "Examples:".bold.println
+  example("koki init",       "start a project here")
   example("koki new my-app", "start one in ./my-app")
   example("koki add nel-kk", "add a Koka library")
-  example("koki run", "build it and run it")
+  example("koki run",        "build it and run it")
   out-blank()
-  println("Run " ++ term-cyan("koki help <command>") ++ " for the options of one command.")
+  println("Run %1 for the options of one command."%^["koki help <command>".cyan])
 
 fun print-groups() : io ()
   help-groups.foreach fn(g)
-    println(term-bold(g.title))
-    g.names.foreach fn(n)
-      println(help-row(n))
+    g.title.bold.println
+    g.names.foreach fn(nm)
+      println(help-row(nm))
     out-blank()
 
 // One "  command          what it does" line, aligned across the block.
 fun example(cmd-text : string, what : string) : io ()
-  println("  " ++ term-cyan(cmd-text) ++ term-dim(" ".repeat(20 - cmd-text.list.length) ++ what))
+  println("  " ++ cyan(cmd-text) ++ dim(" ".repeat(20 - cmd-text.list.length) ++ what))
 
 // "  koki add <DEP>..." — the argument placeholder is dimmed, and a command
 // that takes no arguments gets no trailing space.
 fun usage-line(c : command) : io string
   val sfx = usage-suffix(c.name)
   if sfx.is-empty then "  koki " ++ c.name
-  else "  koki " ++ c.name ++ " " ++ term-dim(sfx)
+  else "  koki %1 %2"%^[c.name, dim(sfx)]
 
 fun print-command-help(c : command) : io ()
-  println(term-bold("koki " ++ c.name) ++ " — " ++ c.summary)
+  println(bold("koki " ++ c.name) ++ " — " ++ c.summary)
   out-blank()
   "Usage:".println
   usage-line(c).println
-  if c.args.is-empty then () else {
+  if c.args.is-empty.not then
     out-blank()
     "Options:".println
-    usage-text(c.args).println
-  }
+    c.args.usage-text.println
+
   out-blank()
-  println(term-bold("Options common to every command:"))
+  "Options common to every command:".bold.println
   usage-text(global-args).println
 
 fun usage-suffix(name : string) : string
   match name
-    "init" -> "[DIR]"
-    "new" -> "<NAME> [DIR]"
-    "add" -> "<DEP>..."
+    "init"   -> "[DIR]"
+    "new"    -> "<NAME> [DIR]"
+    "add"    -> "<DEP>..."
     "remove" -> "<DEP>..."
-    "run" -> "[ARGS...]"
-    "dev" -> "[COMMAND...]"
-    "repl" -> "[KOKA-OPTIONS...]"
-    "help" -> "[COMMAND]"
-    _ -> ""
+    "run"    -> "[ARGS...]"
+    "dev"    -> "[COMMAND...]"
+    "repl"   -> "[KOKA-OPTIONS...]"
+    "help"   -> "[COMMAND]"
+    _        -> ""
 
 fun print-version() : io ()
   println("koki " ++ koki-version)
@@ -144,90 +146,85 @@ fun print-version() : io ()
 
 // An unknown command is nearly always a typo, so offer the nearest one.
 fun unknown-command(name : string) : io int
-  out-error("no such command: " ++ term-bold(name))
+  out-error("no such command: " ++ bold(name))
   match str-closest(name, command-names)
-    Just(sug) -> out-hint("did you mean `koki " ++ sug ++ "`?")
-    Nothing -> out-hint("run `koki help` to see the available commands")
+    Just(sug) -> out-hint("did you mean `koki %1`?"%^[sug])
+    Nothing   -> out-hint("run `koki help` to see the available commands")
   2
 
 fun usage-error(c : command, p : parsed) : io int
-  p.errors.foreach fn(e) {
-    str-lines(e).foreach fn(line) {
-      if str-starts-with(line, "  ") then out-detail(line.trim) else out-error(line)
-    }
-  }
+  p.errors.foreach fn(e)
+    str-lines(e).foreach fn(line)
+      if   str-starts-with(line, "  ")
+      then out-detail(line.trim)
+      else out-error(line)
   out-blank()
-  println("Usage: koki " ++ c.name ++ " " ++ term-dim(usage-suffix(c.name)))
-  out-hint("run `koki help " ++ c.name ++ "` for the full list")
+  println("Usage: koki %1 %2"%^[c.name, c.name.usage-suffix.dim])
+  out-hint("run `koki help %1` for the full list"%^[c.name])
   2
 
 // Apply the presentation flags before anything is printed.
 fun apply-globals(p : parsed) : io ()
-  if p.has("no-color") then force-color(False)
-  elif p.has("color") then force-color(True)
-  if p.has("quiet") then set-quiet(True)
+  if   p.has("quiet")    then set-quiet(True)
+  if   p.has("no-color") then force-color(False)
+  elif p.has("color")    then force-color(True)
 
 pub fun run-args(argv : list<string>) : io int
   match argv
-    Nil -> {
+    Nil ->
       print-usage()
       return 0
-    }
     Cons(first, _) ->
-      if str-starts-with(first, "-") then {
+      if str-starts-with(first, "-") then
         // No command: the only sensible things are asking for the version or
         // for help. Anything else is a mistake worth naming.
         val p = parse-args(global-args, argv)
         apply-globals(p)
-        if p.has("version") then {
+        if p.has("version") then
           print-version()
           return 0
-        }
-        if p.errors.is-empty then {
+        if p.errors.is-empty then
           print-usage()
           return 0
-        }
         p.errors.foreach fn(e) out-error(e)
         out-hint("run `koki help` to see the available commands")
         return 2
-      } else {
+      else
         dispatch(argv)
-      }
 
 // Split `argv` into the command name and the rest, ignoring global flags that
 // appear before it.
 fun split-command(argv : list<string>) : (string, list<string>)
   match argv
-    Nil -> ("", [])
-    Cons(hd, tl) -> if str-starts-with(hd, "-") then split-command(tl) else (hd, tl)
+    Nil          -> ("", [])
+    Cons(hd, tl) ->
+      if   str-starts-with(hd, "-")
+      then split-command(tl)
+      else (hd, tl)
 
 fun dispatch(argv : list<string>) : io int
   val (name, rest) = split-command(argv)
-  if name.is-empty then {
+  if name.is-empty then
     print-usage()
     return 0
-  }
-  if name == "help" then {
+  if name == "help" then
     val p = parse-args(global-args, rest)
     apply-globals(p)
     return cmd-help(p)
-  }
+
   match find-command(name)
     Nothing -> unknown-command(name)
-    Just(c) -> {
+    Just(c) ->
       val p = parse-args(c.args ++ global-args, rest)
       apply-globals(p)
-      if p.has("version") then {
+      if p.has("version") then
         print-version()
         return 0
-      }
-      if p.has("help") then {
+      if p.has("help") then
         print-command-help(c)
         return 0
-      }
       if !p.errors.is-empty then return usage-error(c, p)
       (c.action)(p)
-    }
 
 // `koki help` and `koki help <command>`. This is not in the command table:
 // printing the table would mean the table referred to itself, and Koka will
@@ -235,13 +232,12 @@ fun dispatch(argv : list<string>) : io int
 // `help-groups` still lists it, so it reads as a command everywhere else.
 fun cmd-help(p : parsed) : io int
   match p.positional
-    Nil -> {
+    Nil ->
       print-usage()
       0
-    }
     Cons(name, _) ->
-      if name == "help" then {
-        println(term-bold("koki help") ++ " — show help for a command")
+      if name == "help" then
+        println(bold("koki help") ++ " — show help for a command")
         out-blank()
         "Usage:".println
         "  koki help [COMMAND]".println
@@ -249,11 +245,10 @@ fun cmd-help(p : parsed) : io int
         "With no command it prints the overview; with one it prints that".println
         "command's options.".println
         0
-      } else {
+      else
         match find-command(name)
-          Just(c) -> {
+          Just(c) ->
             print-command-help(c)
             0
-          }
           Nothing -> unknown-command(name)
-      }
+

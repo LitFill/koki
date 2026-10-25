@@ -37,7 +37,7 @@ pub fun str-after(s : string, needle : string) : div maybe<string>
   val nd = needle.list
   val last-start = cs.length - nd.length
   var skip := 0
-  while { skip <= last-start && cs.drop(skip).take(nd.length) != nd }
+  while { skip <= last-start && cs.drop(skip).take(nd.length).string != needle }
     skip := skip + 1
 
   if skip > last-start then Nothing

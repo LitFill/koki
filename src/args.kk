@@ -7,6 +7,8 @@
 
 module src/args
 
+import util
+
 import src/strutil
 
 // One accepted option. `meta` is empty for a boolean switch and otherwise the
@@ -79,25 +81,24 @@ fun all-names(defs : list<argdef>) : list<string>
 
 fun unknown-error(defs : list<argdef>, given : string) : div string
   match str-closest(given, all-names(defs))
-    Just(sug) -> "unexpected argument '" ++ given ++ "'\n  did you mean '" ++ sug ++ "'?"
-    Nothing   -> "unexpected argument '" ++ given ++ "'"
+    Just(sug) -> "unexpected argument '%1'\n  did you mean '%2'?"%^[given, sug]
+    Nothing   -> "unexpected argument '%1'"%^[given]
 
 // Consume the value of an option, either attached (`--name=v`) or as the next
 // argument (`--name v`).
 fun take-value(rest : list<string>, attached : maybe<string>) : (maybe<string>, list<string>)
   match attached
     Just(v) -> (Just(v), rest)
-    Nothing ->
-      match rest
-        Nil -> (Nothing, Nil)
-        Cons(v, tl) -> (Just(v), tl)
+    Nothing -> match rest
+      Nil         -> (Nothing, Nil)
+      Cons(v, tl) -> (Just(v), tl)
 
 // Apply one argument. Returns the updated accumulator, the arguments still to
 // be processed, and whether to keep going. The parser is a single loop over
 // `step` because Koka cannot infer effects through mutual recursion.
 fun step(defs : list<argdef>, p : parsed, args : list<string>) : div (parsed, list<string>, bool)
   match args
-    Nil -> (p, Nil, False)
+    Nil           -> (p, Nil, False)
     Cons(arg, tl) ->
      if arg == "--" then
         // A bare `--` ends option parsing; the rest is pass-through.
@@ -119,7 +120,7 @@ fun accept-value(
 ) : (parsed, list<string>, bool)
   match take-value(rest, attached)
     (Just(v), tl) -> (p(options = p.options ++ [(d.long, v)]), tl, True)
-    (Nothing, _) -> (p(errors = p.errors ++ [ "option '" ++ spelling ++ "' requires a value" ]), rest, True)
+    (Nothing, _)  -> (p(errors = p.errors ++ [ "option '%1' requires a value"%^[spelling] ]), rest, True)
 
 fun step-long(
   defs : list<argdef>,
@@ -144,7 +145,7 @@ fun step-long(
       Nothing -> (p(errors = p.errors ++ [ unknown-error(defs, "--" ++ name) ]), rest, True)
       Just(d) ->
         if !d.meta.is-empty then
-          (p(errors = p.errors ++ [ "option '--" ++ name ++ "' does not take a value" ]), rest, True)
+          (p(errors = p.errors ++ [ "option '--%1' does not take a value"%^[name] ]), rest, True)
         else
           (p(switches = p.switches ++ [ "no-" ++ real ]), rest, True)
   else
@@ -163,21 +164,20 @@ fun step-short(
   body : string
 ) : div (parsed, list<string>, bool)
   match body.list
-    Nil -> (p(errors = p.errors ++ [ unknown-error(defs, "-" ++ body) ]), rest, True)
-    Cons(c, tl) ->
-      match find-short(defs, c)
-        Nothing -> (p(errors = p.errors ++ [ unknown-error(defs, "-" ++ c.string) ]), rest, True)
-        Just(d) ->
-          if !d.meta.is-empty then
-            // Accept both `-tlib` and `-t=lib` for a short option.
-            val tail-s   = tl.string
-            val attached =
-                if   tail-s.is-empty              then Nothing
-                elif str-starts-with(tail-s, "=") then Just(str-drop(tail-s, 1))
-                else Just(tail-s)
-            accept-value(p, rest, d, attached, "-" ++ c.string)
-          else
-            (p(switches = p.switches ++ [d.long]), rest, True)
+    Nil         -> (p(errors = p.errors ++ [ unknown-error(defs, "-" ++ body) ]), rest, True)
+    Cons(c, tl) -> match find-short(defs, c)
+      Nothing -> (p(errors = p.errors ++ [ unknown-error(defs, "-" ++ c.string) ]), rest, True)
+      Just(d) ->
+        if !d.meta.is-empty then
+          // Accept both `-tlib` and `-t=lib` for a short option.
+          val tail-s   = tl.string
+          val attached =
+              if   tail-s.is-empty              then Nothing
+              elif str-starts-with(tail-s, "=") then Just(str-drop(tail-s, 1))
+              else Just(tail-s)
+          accept-value(p, rest, d, attached, "-" ++ c.string)
+        else
+          (p(switches = p.switches ++ [d.long]), rest, True)
 
 fun parse-go(defs : list<argdef>, p : parsed, args : list<string>) : div parsed
   val (next, rest, keep) = step(defs, p, args)
@@ -189,7 +189,7 @@ pub fun parse-args(defs : list<argdef>, args : list<string>) : div parsed
 // ---------- help rendering ----------
 
 fun short-col(d : argdef) : string
-  if d.short.is-empty then "    " else "-" ++ d.short ++ " "
+  if d.short.is-empty then "    " else "-%1 "%^[d.short]
 
 fun long-col(d : argdef) : string
   val name = "--" ++ d.long
@@ -199,5 +199,5 @@ fun long-col(d : argdef) : string
 pub fun usage-text(defs : list<argdef>) : string
   val width = maximum(defs.map fn(d) count(d.short-col ++ d.long-col), default=20)
   defs.map fn(d)
-    "  " ++ (d.short-col ++ d.long-col).pad-right(width) ++ "  " ++ d.help
+    "  %1  %2"%^[pad-right(d.short-col ++ d.long-col, width), d.help]
   .join("\n")
