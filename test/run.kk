@@ -178,15 +178,15 @@ fun registry-checks() : div list<result>
 
 // ---------- templates ----------
 
-val demo : settings = Settings("demo-app", "A demo", "0.1.0", "Nobody", "MIT", "2026", "bin")
-val demo-lib : settings = Settings("demo-lib", "A library", "0.1.0", "Nobody", "MIT", "2026", "lib")
-val demo-test : settings = Settings("demo-test", "A test", "0.1.0", "Nobody", "MIT", "2026", "test")
+val demo : settings = Settings("demo-app", "A demo", "0.2.0", "Nobody", "MIT", "2026", "bin")
+val demo-lib : settings = Settings("demo-lib", "A library", "0.2.0", "Nobody", "MIT", "2026", "lib")
+val demo-test : settings = Settings("demo-test", "A test", "0.2.0", "Nobody", "MIT", "2026", "test")
 
 fun template-checks() : div list<result>
   [
     check("the name reaches the flake", render-flake(demo).contains("pname = \"demo-app\"")),
     check("the description reaches the flake", render-flake(demo).contains("A demo")),
-    check("the version reaches the flake", render-flake(demo).contains("version = \"0.1.0\"")),
+    check("the version reaches the flake", render-flake(demo).contains("version = \"0.2.0\"")),
     check("nix interpolation survives rendering", render-flake(demo).contains("$" ++ "{system}")),
     check("no nix placeholder survives rendering", render-flake(demo).contains("#{") == False),
     check("no file placeholder survives rendering", render-flake(demo).contains("{{") == False),

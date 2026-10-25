@@ -47,7 +47,7 @@
         pkgs: system: {
           default = pkgs.stdenv.mkDerivation {
             pname = "koki";
-            version = "0.1.1";
+            version = "0.2.0";
             src = pkgs.lib.cleanSourceWith {
               src = self;
               filter =
@@ -122,7 +122,7 @@
         pkgs: system: {
           tests = pkgs.stdenv.mkDerivation {
             pname = "koki-tests";
-            version = "0.1.1";
+            version = "0.2.0";
             src = pkgs.lib.cleanSourceWith {
               src = self;
               filter =

@@ -76,7 +76,7 @@ Template (bin, lib, test) [bin]:
 Description [A Koka project]:
 Author [Anonymous]:
 License [MIT]:
-Version [0.1.0]:
+Version [0.2.0]:
 ✔ created game (bin)
 ```
 
