@@ -81,7 +81,7 @@
               # --replace-fail aborts the build if the literal ever changes,
               # instead of silently shipping an unstamped binary.
               substituteInPlace src/cli.kk \
-                --replace-fail '"${baseVersion}"' '"${fullVersion}"'
+                --replace-fail '"<version-number>"' '"${fullVersion}"'
               koka -o koki -O1 ${kokaLibArgs pkgs} main.kk
               runHook postBuild
             '';
