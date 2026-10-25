@@ -42,7 +42,7 @@ pub val init-args : list<argdef> = [
   arg-opt("description", "d", "TEXT", "one-line description"),
   arg-opt("author",      "a", "NAME", "copyright holder"),
   arg-opt("license",     "l", "TEXT", "license name (default: MIT)"),
-arg-opt("pkg-version", "",  "VER",  "starting version (default: 0.2.0)"),
+  arg-opt("pkg-version", "",  "VER",  "starting version (default: 0.1.0)"),
 
   arg-switch("yes",     "y", "take every default without asking"),
   arg-switch("force",   "f", "overwrite files that already exist"),
@@ -76,7 +76,7 @@ fun ask-missing(p : parsed, dir : string) : io answers
   val desc   = p.value("description").default(if ask then prompt-ask("Description", "A Koka project")   else "A Koka project")
   val author = p.value("author")     .default(if ask then prompt-ask("Author", "Anonymous")             else "Anonymous")
   val lic    = p.value("license")    .default(if ask then prompt-ask("License", "MIT")                  else "MIT")
-  val ver    = p.value("pkg-version").default(if ask then prompt-ask("Version", "0.2.0")                else "0.2.0")
+  val ver    = p.value("pkg-version").default(if ask then prompt-ask("Version", "0.1.0")                else "0.1.0")
   Answers(name, kind, desc, author, lic, ver)
 
 fun check-kind(kind : string) : io bool
