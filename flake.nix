@@ -20,6 +20,12 @@
       ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system} system);
 
+      baseVersion = "0.2.0";
+
+      revision = self.shortRev or self.dirtyShortRev or null;
+
+      fullVersion = baseVersion + (if revision == null then "" else "-${revision}");
+
       # One Koka include directory per dependency. `koki add` writes the
       # lines between the markers below and `koki remove` takes them out;
       # the compiler flags and the editor include list further down are both
@@ -40,28 +46,30 @@
       kokaJson =
         pkgs:
         ''{"include_dirs":[${builtins.concatStringsSep "," (map (d: "\"${d}\"") (kokaLibsFor pkgs))}]}'';
+
+      # Shared by the package and the test check.
+      kokiSrc =
+        pkgs:
+        pkgs.lib.cleanSourceWith {
+          src = self;
+          filter =
+            path: type:
+            !(builtins.elem (baseNameOf (toString path)) [
+              "result"
+              "koka.json"
+              ".koka"
+              "koki"
+            ]);
+        };
     in
     {
-
       packages = forAllSystems (
         pkgs: system: {
           default = pkgs.stdenv.mkDerivation {
             pname = "koki";
-            version = "0.2.0";
-            src = pkgs.lib.cleanSourceWith {
-              src = self;
-              filter =
-                path: type:
-                let
-                  base = baseNameOf (toString path);
-                in
-                !(builtins.elem base [
-                  "result"
-                  "koka.json"
-                  ".koka"
-                  "koki"
-                ]);
-            };
+            version = fullVersion; # also exposed as `.version` / `lib.getVersion`
+            src = kokiSrc pkgs;
+
             nativeBuildInputs = [
               pkgs.koka
               pkgs.stdenv.cc
@@ -69,7 +77,12 @@
 
             buildPhase = ''
               runHook preBuild
-              koka -o koki ${kokaLibArgs pkgs} main.kk
+              # Bake the full version (with revision) into `koki --version`.
+              # --replace-fail aborts the build if the literal ever changes,
+              # instead of silently shipping an unstamped binary.
+              substituteInPlace src/cli.kk \
+                --replace-fail '"${baseVersion}"' '"${fullVersion}"'
+              koka -o koki -O1 ${kokaLibArgs pkgs} main.kk
               runHook postBuild
             '';
 
@@ -78,9 +91,6 @@
               install -Dm755 koki $out/bin/koki
               runHook postInstall
             '';
-
-            # `koki --version` reports this, so keep the two in step.
-            passthru.version = "0.2.0";
 
             meta = {
               description = "koki — the Koka project manager";
@@ -122,21 +132,8 @@
         pkgs: system: {
           tests = pkgs.stdenv.mkDerivation {
             pname = "koki-tests";
-            version = "0.2.0";
-            src = pkgs.lib.cleanSourceWith {
-              src = self;
-              filter =
-                path: type:
-                let
-                  base = baseNameOf (toString path);
-                in
-                !(builtins.elem base [
-                  "result"
-                  "koka.json"
-                  ".koka"
-                  "koki"
-                ]);
-            };
+            version = baseVersion;
+            src = kokiSrc pkgs;
             nativeBuildInputs = [
               pkgs.koka
               pkgs.stdenv.cc
