@@ -74,7 +74,7 @@ pub fun resolve(
 
 // Does this already name a flake input? True for `github:o/r`, `path:../x`,
 // `https://host/r` and `git+https://...`, false for a bare `o/r`.
-fun explicit-ref(want : string) : bool
+pub fun explicit-ref(want : string) : bool
   if want.contains("://")  then return True
   if want.contains("git+") then return True
   match str-before(want, '/')

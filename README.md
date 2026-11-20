@@ -52,7 +52,8 @@ $ nix run github:LitFill/koki -- init
 | `koki doctor` | check the toolchain and the project |
 
 `koki help <command>` prints the options for one command. `koki --version` and
-`--quiet`, `--no-color`, `--color`, `--verbose` work everywhere.
+`--quiet`, `--no-color`, `--color` and `--verbose` (which echoes the Nix
+commands) work before or after the command name.
 
 ## Templates
 

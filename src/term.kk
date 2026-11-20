@@ -21,6 +21,12 @@ pub extern flush-out() : console ()
   c  inline "fflush(stdout);"
   js inline ""
 
+// Errors go to stderr, so `koki … 2>/dev/null` really silences them and
+// `> out 2> err` puts them where a caller expects.
+pub extern eprintsln(s : string) : console ()
+  c  inline "kk_ssize_t _n; fprintf(stderr, \"%s\\n\", kk_string_cbuf_borrow(#1, &_n, kk_context()));"
+  js inline "console.error(#1)"
+
 // ---------- capability detection ----------
 
 // What `--color` / `--no-color` asked for, before the environment and the
@@ -42,7 +48,7 @@ fun fd-is-tty(fd : string) : io bool
 pub fun color-from-env(
   koki     : maybe<string>,
   no-color : bool,
-  force    : bool,
+  force    : maybe<string>,
   term     : maybe<string>,
   tty      : bool
 ) : bool
@@ -53,16 +59,24 @@ pub fun color-from-env(
     Just("1")      -> True
     _ ->
       if   no-color then False
-      elif force    then True
+      elif clicolor-force(force) then True
       else match term
         Just("dumb") -> False
         _            -> tty
+
+// `CLICOLOR_FORCE` forces colour for any value except `0`, as the convention
+// has it.
+fun clicolor-force(v : maybe<string>) : bool
+  match v
+    Just("0") -> False
+    Just(_)   -> True
+    Nothing   -> False
 
 // The environment plus the terminal. One shell spawn for the tty probe.
 fun env-color() : io bool
   color-from-env(get-env-value("KOKI_COLOR"),
                  get-env-value("NO_COLOR").is-just,
-                 get-env-value("CLICOLOR_FORCE").is-just,
+                 get-env-value("CLICOLOR_FORCE"),
                  get-env-value("TERM"),
                  fd-is-tty("1"))
 
@@ -106,6 +120,14 @@ pub fun set-quiet(b : bool) : io ()
 pub fun term-quiet() : read<global> bool
   (!quiet-cache)
 
+val verbose-cache : ref<global, bool> = unsafe-total { ref(False) }
+
+pub fun set-verbose(b : bool) : io ()
+  verbose-cache := b
+
+pub fun term-verbose() : read<global> bool
+  (!verbose-cache)
+
 // ---------- styling ----------
 
 pub fun style(s : string, codes : string) : io string
@@ -145,13 +167,13 @@ pub fun out-warn(s : string) : io ()
 pub fun out-detail(s : string) : io ()
   if !term-quiet() then println("  " ++ dim(s))
 
-// A fatal problem. Always on stderr, always red, never colourless.
+// A fatal problem. Always on stderr, so a caller can keep it out of the data.
 pub fun out-error(s : string) : io ()
-  println("error".bold.red ++ ": " ++ s)
+  eprintsln("error".bold.red ++ ": " ++ s)
 
-// The remedy for the line above.
+// The remedy for the line above, on stderr with it.
 pub fun out-hint(s : string) : io ()
-  println("  " ++ "help".cyan ++ ": " ++ s)
+  eprintsln("  " ++ "help".cyan ++ ": " ++ s)
 
 // A titled block, used for `koki info` and the `next steps` footer.
 pub fun out-heading(s : string) : io ()

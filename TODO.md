@@ -29,6 +29,12 @@ Priorities: **high** — wrong results, or a footgun that can cost something;
 - **The `div` annotations are partly inference artefacts**, not statements
   about termination. Do not read them as "this may not terminate".
 
+## UX
+
+- **open — exit codes without a command.** `koki` with no arguments and
+  `koki doctor` outside a project both print help or advice and exit 0.
+  Decide whether a script should read those as failure.
+
 ## Testing gaps
 
 - **No end-to-end test that builds a generated project.** The templates are

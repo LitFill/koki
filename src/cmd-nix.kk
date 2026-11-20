@@ -153,6 +153,7 @@ fun built-version(root : path) : io maybe<string>
   val cmd = "cd " ++ str-shquote(root.string) ++
             " && s=$(nix eval --no-write-lock-file --impure --raw --expr builtins.currentSystem)" ++
             " && nix eval --no-write-lock-file --raw .#packages.$s.default.version 2>/dev/null"
+  if term-verbose() then out-detail("$ " ++ cmd)
   match run-system-read(cmd)
     Ok(s)    -> if s.trim.is-empty then Nothing else Just(s.trim)
     Error(_) -> Nothing

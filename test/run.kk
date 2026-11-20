@@ -163,23 +163,27 @@ val term-checks : list<result> = [
 fun color-checks() : io list<result>
   [
     check("KOKI_COLOR=never wins over a terminal",
-          !color-from-env(Just("never"), False, True, Nothing, True)),
+          !color-from-env(Just("never"), False, Just("1"), Nothing, True)),
     check("KOKI_COLOR=0 is off",
-          !color-from-env(Just("0"), False, False, Nothing, True)),
+          !color-from-env(Just("0"), False, Nothing, Nothing, True)),
     check("KOKI_COLOR=always wins over NO_COLOR",
-          color-from-env(Just("always"), True, False, Nothing, False)),
+          color-from-env(Just("always"), True, Nothing, Nothing, False)),
     check("KOKI_COLOR=1 is on",
-          color-from-env(Just("1"), False, False, Nothing, False)),
+          color-from-env(Just("1"), False, Nothing, Nothing, False)),
     check("NO_COLOR beats CLICOLOR_FORCE",
-          !color-from-env(Nothing, True, True, Nothing, True)),
+          !color-from-env(Nothing, True, Just("1"), Nothing, True)),
     check("CLICOLOR_FORCE beats an absent terminal",
-          color-from-env(Nothing, False, True, Nothing, False)),
+          color-from-env(Nothing, False, Just("1"), Nothing, False)),
+    check("CLICOLOR_FORCE=0 does not force colour",
+          !color-from-env(Nothing, False, Just("0"), Nothing, False)),
+    check("CLICOLOR_FORCE=1 does",
+          color-from-env(Nothing, False, Just("1"), Nothing, False)),
     check("TERM=dumb beats a terminal",
-          !color-from-env(Nothing, False, False, Just("dumb"), True)),
+          !color-from-env(Nothing, False, Nothing, Just("dumb"), True)),
     check("a terminal decides when nothing else does",
-          color-from-env(Nothing, False, False, Nothing, True)),
+          color-from-env(Nothing, False, Nothing, Nothing, True)),
     check("a pipe is colourless",
-          !color-from-env(Nothing, False, False, Nothing, False)),
+          !color-from-env(Nothing, False, Nothing, Nothing, False)),
     check("the Never choice is off", resolve-color(Never) == False),
     check("the Always choice is on", resolve-color(Always) == True),
   ]
@@ -380,18 +384,22 @@ fun region-checks() : div list<result>
 // `apply-edits`, so both are checked here.
 
 // The edit `koki remove <name>` would make for one spelling of a dependency.
-fun remove-edit(name : string) : edit
-  Edit(name, resolve(name, Nothing, Nothing).fst, "", "")
+fun remove-edit(f : kflake, name : string) : div edit
+  Edit(name, remove-input(f, name), "", "")
 
 val added-edit : edit =
   Edit("nel-kk", "nel-kk", "github:LitFill/nel-kk",
        entry-for("nel-kk", "kokaLibraries", "nonempty"))
 
 fun edit-checks() : io list<result>
-  val base    = render-flake(demo)
-  val added   = flake-add(parse-or-die(base), "nel-kk", "github:LitFill/nel-kk",
-                          entry-for("nel-kk", "packages", "default"))
-  val applied = apply-edits(base, [ added-edit ], Adding, [], [])
+  val base     = render-flake(demo)
+  val added    = flake-add(parse-or-die(base), "nel-kk", "github:LitFill/nel-kk",
+                           entry-for("nel-kk", "packages", "default"))
+  val path-text = flake-add(parse-or-die(base), "dep", "path:../dep",
+                            entry-for("dep", "packages", "default"))
+  val path-dep  = parse-or-die(path-text)
+  val applied  = apply-edits(base, [ added-edit ], Adding, [], [])
+  val added-f  = parse-or-die(added)
   [
     check("an addition is applied",
           applied.snd == [ "nel-kk" ] && applied.thd.is-empty),
@@ -400,14 +408,21 @@ fun edit-checks() : io list<result>
     check("adding the same dependency twice skips it",
           apply-edits(applied.fst, [ added-edit ], Adding, [], []).thd == [ "nel-kk" ]),
     check("a dependency added by full ref is removable by full ref",
-          apply-edits(added, [ remove-edit("LitFill/nel-kk") ], Removing, [], []).snd
+          apply-edits(added, [ remove-edit(added-f, "LitFill/nel-kk") ], Removing, [], []).snd
             == [ "LitFill/nel-kk" ]),
     check("a dependency added by full ref is removable by bare name",
-          apply-edits(added, [ remove-edit("nel-kk") ], Removing, [], []).snd == [ "nel-kk" ]),
+          apply-edits(added, [ remove-edit(added-f, "nel-kk") ], Removing, [], []).snd
+            == [ "nel-kk" ]),
     check("removal by full ref restores the file exactly",
-          apply-edits(added, [ remove-edit("LitFill/nel-kk") ], Removing, [], []).fst == base),
+          apply-edits(added, [ remove-edit(added-f, "LitFill/nel-kk") ], Removing, [], []).fst
+            == base),
     check("a dependency that is not there is reported missing",
-          apply-edits(added, [ remove-edit("nope") ], Removing, [], []).thd == [ "nope" ]),
+          apply-edits(added, [ remove-edit(added-f, "nope") ], Removing, [], []).thd == [ "nope" ]),
+    check("a path dependency is removable by the name info shows",
+          remove-input(path-dep, "dep") == "dep"),
+    check("a path dependency can be removed by that name",
+          apply-edits(path-text, [ remove-edit(path-dep, "dep") ], Removing, [], []).snd
+            == [ "dep" ]),
   ]
 
 // ---------- the include path ----------
@@ -468,7 +483,9 @@ fun repl-checks() : div list<result>
 // status and everything it printed. `args` is a shell fragment rather than a
 // quoted string, so a caller can pass an argument that needs quoting.
 fun koki-in(bin : string, dir : string, args : string, env : string = "") : io (int, string)
-  val log = dir ++ "/.koki-out"
+  // The log lives beside `dir`, not inside it: a directory koki is asked to
+  // initialise must still look empty when koki looks at it.
+  val log = dirname(dir.path) ++ "/.koki-out-" ++ basename(dir.path)
   val rc  = run-system("cd %1 && %2 %3 %4 > %5 2>&1"
                       %^[str-shquote(dir), env, str-shquote(bin), args, str-shquote(log)])
   val out = match try fn() { log.path.read-text-file }
@@ -513,6 +530,10 @@ fun dispatch-checks() : io list<result>
   val new-bin = koki-in(bin, d1, "new --yes --no-git demo")
   val info    = koki-in(bin, d1 ++ "/demo", "info")
   val doctor  = koki-in(bin, d1 ++ "/demo", "doctor")
+  val quiet-info   = koki-in(bin, d1 ++ "/demo", "--quiet info")
+  val verbose-info = koki-in(bin, d1 ++ "/demo", "info -v")
+  val rm-missing   = koki-in(bin, d1 ++ "/demo", "remove --yes nope")
+  val typo-add     = koki-in(bin, d1 ++ "/demo", "add --dry-run nel-k")
 
   // The library template.
   val d2 = scratch-dir()
@@ -548,6 +569,13 @@ fun dispatch-checks() : io list<result>
   // must not offer a commit there is nothing to commit to.
   val d7 = scratch-dir()
   val no-git = koki-in(bin, d7, "new --yes demo", "PATH=")
+
+  // A project created in a directory of its own takes that directory's name.
+  val d8 = scratch-dir()
+  match try fn() { (d8 ++ "/nameit").path.ensure-dir }
+    Ok(_)    -> ()
+    Error(_) -> ()
+  val init-named = koki-in(bin, d8 ++ "/nameit", "init --yes --no-git")
 
   // Doctor has somewhere to stand and no project to stand in.
   val doctor-none = koki-in(bin, d0, "doctor")
@@ -611,6 +639,17 @@ fun dispatch-checks() : io list<result>
             && !no-git.snd.contains("commit it")),
     check("the project is created even without git",
           project-file(d7, "demo/flake.nix")),
+    check("a global flag before the command still runs it",
+          quiet-info.fst == 0 && quiet-info.snd.contains("koka project")),
+    check("--verbose echoes the nix command",
+          verbose-info.snd.contains("nix eval")),
+    check("a removal that finds nothing fails",
+          rm-missing.fst == 1 && rm-missing.snd.contains("nothing changed")),
+    check("a typo'd short name is suggested",
+          typo-add.fst == 0 && typo-add.snd.contains("did you mean `nel-kk`")),
+    check("init names the project after its directory",
+          init-named.fst == 0
+            && file-has(d8, "nameit/flake.nix", "pname = \"nameit\"")),
   ]
 
 // ---------- runner ----------

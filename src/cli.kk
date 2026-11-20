@@ -166,6 +166,7 @@ fun usage-error(c : command, p : parsed) : io int
 // Apply the presentation flags before anything is printed.
 fun apply-globals(p : parsed) : io ()
   if   p.has("quiet")    then set-quiet(True)
+  if   p.has("verbose")  then set-verbose(True)
   if   p.has("no-color") then force-color(Never)
   elif p.has("color")    then force-color(Always)
 
@@ -176,31 +177,55 @@ pub fun run-args(argv : list<string>) : io int
       return 0
     Cons(first, _) ->
       if str-starts-with(first, "-") then
-        // No command: the only sensible things are asking for the version or
-        // for help. Anything else is a mistake worth naming.
-        val p = parse-args(global-args, argv)
+        // A bare `--` ends the options with no command in front of them.
+        if first == "--" then
+          print-usage()
+          return 0
+        // Global switches may come before the command; everything after them
+        // is the command and its own arguments.
+        val (flags, rest) = split-globals(argv)
+        val p = parse-args(global-args, flags)
         apply-globals(p)
         if p.has("version") then
           print-version()
           return 0
-        if p.errors.is-empty then
+        if p.has("help") then
           print-usage()
           return 0
-        p.errors.foreach fn(e) out-error(e)
-        out-hint("run `koki help` to see the available commands")
-        return 2
+        if p.errors.is-empty.not then
+          p.errors.foreach fn(e) out-error(e)
+          out-hint("run `koki help` to see the available commands")
+          return 2
+        match rest
+          Nil ->
+            print-usage()
+            return 0
+          Cons(a, _) ->
+            if a == "--" then
+              print-usage()
+              return 0
+            dispatch(rest)
       else
         dispatch(argv)
 
-// Split `argv` into the command name and the rest, ignoring global flags that
-// appear before it.
+// Split the global switches that come before the command from the command and
+// its own arguments. Every global option is a switch, so the first word that
+// is not a flag ends the globals; a bare `--` ends them too.
+fun split-globals(args : list<string>) : (list<string>, list<string>)
+  match args
+    Nil -> ([], [])
+    Cons(a, tl) ->
+      if a == "--" || !str-starts-with(a, "-") then ([], args)
+      else
+        val (flags, rest) = split-globals(tl)
+        (Cons(a, flags), rest)
+
+// The command name and its arguments. Leading global flags are split off by
+// `run-args` before dispatch.
 fun split-command(argv : list<string>) : (string, list<string>)
   match argv
     Nil          -> ("", [])
-    Cons(hd, tl) ->
-      if   str-starts-with(hd, "-")
-      then split-command(tl)
-      else (hd, tl)
+    Cons(hd, tl) -> (hd, tl)
 
 fun dispatch(argv : list<string>) : io int
   val (name, rest) = split-command(argv)

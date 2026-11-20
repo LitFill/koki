@@ -52,9 +52,10 @@ pub val init-args : list<argdef> = [
 
 val template-kinds : list<string> = [ "bin", "lib", "test" ]
 
-// The name a project gets when nothing else says otherwise.
+// The name a project gets when nothing else says otherwise: the directory it
+// is created in, or the working directory when the project is the current one.
 fun default-name(dir : string) : string
-  str-sanitize-name(if dir.is-empty || dir == "." then "koka-app" else dir)
+  str-sanitize-name(if dir.is-empty then "koka-app" else dir)
 
 // Everything `koki init` needs to know. Koka has no six-tuples, and a record
 // reads better at the call site anyway.
@@ -71,7 +72,8 @@ pub struct answers
 fun ask-missing(p : parsed, dir : string) : io answers
   val tmpl   = template-kinds.join(", ")
   val ask    = !p.has("yes") && term-interactive()
-  val name   = p.value("name")       .default(if ask then prompt-ask("Project name", default-name(dir)) else default-name(dir))
+  val base   = if dir.is-empty || dir == "." then basename(cwd()) else dir
+  val name   = p.value("name").default(if ask then prompt-ask("Project name", default-name(base)) else default-name(base))
   val kind   = p.value("template")   .default(if ask then prompt-ask("Template (%1)"%^[tmpl], "bin")    else "bin")
   val desc   = p.value("description").default(if ask then prompt-ask("Description", "A Koka project")   else "A Koka project")
   val author = p.value("author")     .default(if ask then prompt-ask("Author", "Anonymous")             else "Anonymous")
@@ -268,6 +270,18 @@ fun describe-add(a : addition) : io ()
   out-item(bold(a.input) ++ "  " ++ dim(a.source))
   out-detail(a.entry)
 
+// A bare word koki does not know is read as a GitHub `owner/repo`. When it is
+// one edit away from a library in the registry, say so before a ref the user
+// did not mean lands in flake.nix.
+fun suggest-known(want : string) : io ()
+  match lookup(want)
+    Just(_) -> ()
+    Nothing ->
+      if explicit-ref(want) then ()
+      else match str-closest(want, known-libs.map(_.name))
+        Just(sug) -> out-warn("`%1` is not a known library; did you mean `%2`?"%^[want, sug])
+        Nothing   -> ()
+
 // The libs region is koki's. A line in it that is not an entry is a dependency
 // koki cannot see, and removing one would leave the expression behind, so the
 // command refuses rather than editing around it.
@@ -292,6 +306,7 @@ pub fun cmd-add(p : parsed) : io int
     Nothing -> return 1
     Just(f) -> f
   if !check-readable(base) then return 1
+  p.positional.foreach fn(w) suggest-known(w)
   val attr-override = p.value("attr")
   val lib-override  = p.value("library")
   val adds          = p.positional.map fn(want)
@@ -312,7 +327,9 @@ pub fun cmd-add(p : parsed) : io int
   val text = read-if-there(root/"flake.nix").default("")
   val edits = adds.map fn(a) Edit(a.input, a.input, a.source, a.entry)
   val (newtext, done, bad) = apply-edits(text, edits, Adding, [], [])
-  if bad != [] && done.is-empty             then return 1
+  if bad != [] && done.is-empty then
+    out-hint("nothing was added; if flake.nix already lists it, run `nix flake lock`")
+    return 1
   if !write-file(root/"flake.nix", newtext) then return 1
   if done.is-empty then
     out-warn("nothing changed")
@@ -335,6 +352,14 @@ pub val remove-args : list<argdef> = [
   arg-switch("yes",     "y", "do not ask for confirmation"),
 ]
 
+// The input a typed name refers to. A dependency the flake already has is
+// named by itself, so the name `koki info` shows is the name `koki remove`
+// accepts; anything else resolves the way `koki add` resolved it.
+pub fun remove-input(f : kflake, name : string) : div string
+  match f.flake-deps.find(_.input-name == name)
+    Just(d) -> d.input-name
+    Nothing -> resolve(name, Nothing, Nothing).fst
+
 pub fun cmd-remove(p : parsed) : io int
   if p.positional.is-empty then
     out-error("`koki remove` needs at least one dependency")
@@ -351,11 +376,13 @@ pub fun cmd-remove(p : parsed) : io int
     Nothing -> return fail("flake.nix is not a koki project", "the koki marker regions are missing")
     Just(f) -> f
   if !check-readable(base) then return 1
-  // Resolved the same way the listing above resolves, so the edit lands on
-  // the input the dependency was added under.
-  p.positional.foreach fn(n)
-    if base.flake-has(resolve(n, Nothing, Nothing).fst) then out-item("remove  " ++ bold(n))
-    else out-warn(n ++ " is not a dependency of this project")
+  // Resolved against the flake first, so the name `koki info` shows is the
+  // name `koki remove` accepts.
+  val edits = p.positional.map fn(n) Edit(n, remove-input(base, n), "", "")
+
+  edits.foreach fn(e)
+    if base.flake-has(e.input) then out-item("remove  " ++ bold(e.name))
+    else out-warn(e.name ++ " is not a dependency of this project")
 
   if p.has("dry-run") then
     out-ok("dry run: nothing was written")
@@ -366,12 +393,10 @@ pub fun cmd-remove(p : parsed) : io int
       out-warn("cancelled")
       return 1
 
-  val edits = p.positional.map fn(n)
-    Edit(n, resolve(n, Nothing, Nothing).fst, "", "")
   val (newtext, done, missing) = apply-edits(text, edits, Removing, [], [])
   if done.is-empty then
     out-warn("nothing changed")
-    return 0
+    return 1
 
   if !write-file(root/"flake.nix", newtext) then return 1
   out-ok("removed %1 from flake.nix"%^[done.join(", ")])

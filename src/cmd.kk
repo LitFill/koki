@@ -60,7 +60,9 @@ pub fun fail(message : string, help : string) : io int
 // Run `nix` with `args` in the project directory. The directory is quoted for
 // the shell because a path is allowed to contain a space.
 pub fun nix-in(root : path, args : string) : io int
-  run-child("cd %1 && nix %2"%^[str-shquote(root.string), args])
+  val cmd = "cd %1 && nix %2"%^[str-shquote(root.string), args]
+  if term-verbose() then out-detail("$ " ++ cmd)
+  run-child(cmd)
 
 // Resolve the project root, or explain how to make one.
 pub fun require-project() : io maybe<path>
