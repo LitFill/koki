@@ -51,8 +51,6 @@ Priorities: **high** — wrong results, or a footgun that can cost something;
   the file length. Fine at this size; worth knowing before anyone adds ten.
 - **The `command` record holds a function, so calling it needs `(c.action)(p)`.**
   Correct, but surprising enough that it deserves a comment at the definition.
-- **`koki doctor` does not check that the flake evaluates.** `nix flake metadata`
-  would catch a broken input ref long before a build does.
 
 ## Features
 

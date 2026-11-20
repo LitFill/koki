@@ -282,7 +282,22 @@ fun project-checks(root : path) : io list<check>
       then [ fine(".gitignore covers .koka/, koka.json and result") ]
       else [ advice(".gitignore is missing some generated files",
                  "add .koka/, koka.json and result") ]
-  file-checks ++ lock-check ++ ignore-check
+  // Skipped when Nix is not on the PATH: the toolchain section already says
+  // so, and a second "does not evaluate" would only repeat it.
+  val eval-check =
+    if have-exe("nix") then [ flake-evaluates(root) ]
+    else []
+  file-checks ++ lock-check ++ ignore-check ++ eval-check
+
+// Can Nix evaluate the flake at all? A broken input reference or a syntax
+// error fails here with one sentence instead of halfway through a build. The
+// lockfile is not written: `doctor` is allowed to look, not to change.
+fun flake-evaluates(root : path) : io check
+  val rc = run-system("cd %1 && nix flake metadata --no-write-lock-file >/dev/null 2>&1"
+                     %^[str-shquote(root.string)])
+  if rc == 0 then fine("the flake evaluates")
+  else broken("the flake does not evaluate",
+              "run `nix flake metadata` in " ++ root.string ++ " to see why")
 
 // One line per dependency in the doctor report, as named functions rather than
 // lambdas so the field accesses stay readable next to the check they build.
