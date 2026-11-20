@@ -294,6 +294,39 @@ fun model-checks() : div list<result>
           with-two().flake-deps.length == 2 && with-two-text().contains("kokaLibraries")),
   ]
 
+// ---------- the managed regions ----------
+//
+// The libs region is koki's, not a scratch pad: a line in it that is not an
+// entry is a dependency `remove` would drop the input for and leave behind.
+// The input scan is scoped to `inputs = { ... }`, because the shape it looks
+// for also occurs outside that block by coincidence.
+
+fun with-libs-line(text : string, line : string) : string
+  text.replace-all(libs-start, libs-start ++ "\n        " ++ line)
+
+val hand-line : string = "builtins.getFlake \"./extra\""
+
+fun region-checks() : div list<result>
+  val hand      = parse-or-die(with-libs-line(render-flake(demo), hand-line))
+  val commented = parse-or-die(with-libs-line(render-flake(demo), "# a note koki did not write"))
+  val sneaky    = parse-or-die(render-flake(demo).replace-all(
+    "  description = \"A demo\";",
+    "  description = \"A demo\";\n  meta.name = \"not-an-input\";"))
+  [
+    check("a generated libs region is all entries",
+          flake-unreadable(fresh).is-empty),
+    check("a comment in the libs region is readable",
+          flake-unreadable(commented).is-empty),
+    check("a hand-written line is reported",
+          flake-unreadable(hand) == [ "        " ++ hand-line ]),
+    check("a hand-written line is not a dependency",
+          hand.flake-deps.is-empty),
+    check("an assignment outside the inputs block is not an input",
+          !has-input(sneaky, "meta")),
+    check("nixpkgs is still read from the inputs block",
+          has-input(fresh, "nixpkgs")),
+  ]
+
 // ---------- removing a dependency ----------
 //
 // `koki add` derives an input name from whatever spelling it is given, so the
@@ -437,6 +470,19 @@ fun dispatch-checks() : io list<result>
   val d5 = scratch-dir()
   val dry = koki-in(bin, d5, "init --yes --no-git --dry-run app")
 
+  // A libs region koki cannot read is refused rather than edited around.
+  val d6 = scratch-dir()
+  val new-hand = koki-in(bin, d6, "new --yes --no-git hand")
+  match try fn() {
+    val p = (d6 ++ "/hand/flake.nix").path
+    p.write-text-file(
+      p.read-text-file.replace-all(libs-start, libs-start ++ "\n        ./extra"))
+  }
+    Ok(_)    -> ()
+    Error(_) -> ()
+  val remove-hand = koki-in(bin, d6 ++ "/hand", "remove --yes nel-kk")
+  val add-hand    = koki-in(bin, d6 ++ "/hand", "add --yes nel-kk")
+
   // Doctor has somewhere to stand and no project to stand in.
   val doctor-none = koki-in(bin, d0, "doctor")
 
@@ -487,13 +533,20 @@ fun dispatch-checks() : io list<result>
           dry.fst == 0 && !project-file(d5, "app/flake.nix")),
     check("doctor outside a project says so",
           doctor-none.snd.contains("not inside a koki project")),
+    check("remove refuses a libs region it cannot read",
+          remove-hand.fst == 1 && remove-hand.snd.contains("libs region")),
+    check("add refuses a libs region it cannot read",
+          add-hand.fst == 1 && add-hand.snd.contains("libs region")),
+    check("the refused edit leaves the flake alone",
+          file-has(d6, "hand/flake.nix", "./extra")),
   ]
 
 // ---------- runner ----------
 
 fun main() : io ()
   val rs = strutil-checks() ++ arg-checks() ++ term-checks ++ registry-checks()
-             ++ template-checks() ++ model-checks() ++ remove-checks() ++ repl-checks()
+             ++ template-checks() ++ model-checks() ++ region-checks()
+             ++ remove-checks() ++ repl-checks()
              ++ dispatch-checks()
   rs.foreach fn(r) {
     ((if r.ok then "ok    " else "FAIL  ") ++ r.name).println

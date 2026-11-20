@@ -132,11 +132,47 @@ fun input-refs(lines : list<string>, acc : list<inputref>) : list<inputref>
     Nil          -> acc.reverse
     Cons(hd, tl) -> input-refs(tl, push-ref(parse-input(hd), acc))
 
-// Every flake input the file declares, wherever it declares it. Reading the
-// whole file rather than just the managed region means an input a user added
-// by hand — `nixpkgs` above all — is still reported.
+// The lines of the `inputs = { ... }` block. Braces are counted so that a
+// nested attribute set does not end the scan at its first `}`.
+fun count-char(s : string, c : char) : int
+  s.list.filter(fn(x) x == c).length
+
+fun net-braces(l : string) : int
+  count-char(l, '{') - count-char(l, '}')
+
+fun is-inputs-head(l : string) : bool
+  val t = l.trim
+  str-starts-with(t, "inputs") && t.contains("=")
+
+fun block-aux(ls : list<string>, depth : int, acc : list<string>) : maybe<list<string>>
+  if depth <= 0 then Just(acc.reverse)
+  else match ls
+    Nil -> Nothing
+    Cons(hd, tl) -> block-aux(tl, depth + net-braces(hd), hd.Cons(acc))
+
+fun inputs-block(ls : list<string>) : maybe<list<string>>
+  match ls
+    Nil -> Nothing
+    Cons(hd, tl) ->
+      if !is-inputs-head(hd) then inputs-block(tl)
+      else if hd.contains("{") then block-aux(tl, net-braces(hd), [hd])
+      else match tl
+        Nil -> Nothing
+        Cons(next, rest) ->
+          if next.trim == "{" then block-aux(rest, 1, [hd, next])
+          else Nothing
+
+// Every flake input the file declares, wherever it declares it inside the
+// `inputs` block: `nixpkgs` sits outside the region koki manages and is still
+// reported. The scan is scoped to that block because `word.word = "string"`
+// occurs elsewhere in a flake by coincidence — a `meta` field, a `shellHook`
+// — and reading those as inputs would invent dependencies koki does not manage.
 pub fun flake-input-refs(f : kflake) : list<inputref>
-  input-refs(f.ls, [])
+  match inputs-block(f.ls)
+    Just(ls) -> input-refs(ls, [])
+    // Markers but no `inputs = {` to scope to: fall back to the managed region
+    // rather than report a file koki cannot read.
+    Nothing  -> input-refs(f.inputs.body, [])
 
 fun find-ref(refs : list<inputref>, want : string) : string
   match refs.find(_.name == want)
@@ -152,6 +188,17 @@ pub fun flake-deps(f : kflake) : div list<kdep>
 
 pub fun flake-has(f : kflake, name : string) : div bool
   f.flake-deps.any(_.input-name == name)
+
+// A libs-region line that is neither blank, nor a comment, nor an entry koki
+// can read. It is a dependency koki cannot see: `remove` would drop the input
+// and leave the expression behind, so such a region is refused rather than
+// edited around.
+fun readable-line(l : string) : div bool
+  val t = l.trim
+  t.is-empty || str-starts-with(t, "#") || is-entry(l)
+
+pub fun flake-unreadable(f : kflake) : div list<string>
+  f.libs.body.filter fn(l) !readable-line(l)
 
 // ---------- writing dependencies ----------
 

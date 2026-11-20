@@ -239,6 +239,17 @@ fun describe-add(a : addition) : io ()
   out-item(bold(a.input) ++ "  " ++ dim(a.source))
   out-detail(a.entry)
 
+// The libs region is koki's. A line in it that is not an entry is a dependency
+// koki cannot see, and removing one would leave the expression behind, so the
+// command refuses rather than editing around it.
+fun check-readable(f : kflake) : io bool
+  val bad = flake-unreadable(f)
+  if bad.is-empty then return True
+  out-error("flake.nix has lines in the koki libs region that are not entries")
+  bad.foreach fn(l) out-detail(l.trim)
+  out-hint("rewrite them as `self.inputs.<name>...` entries, or delete them")
+  False
+
 pub fun cmd-add(p : parsed) : io int
   if p.positional.is-empty then
     out-error("`koki add` needs at least one dependency")
@@ -251,6 +262,7 @@ pub fun cmd-add(p : parsed) : io int
   val base = match require-flake(root)
     Nothing -> return 1
     Just(f) -> f
+  if !check-readable(base) then return 1
   val attr-override = p.value("attr")
   val lib-override  = p.value("library")
   val adds          = p.positional.map fn(want)
@@ -332,6 +344,7 @@ pub fun cmd-remove(p : parsed) : io int
   val base = match parse-flake(text)
     Nothing -> return fail("flake.nix is not a koki project", "the koki marker regions are missing")
     Just(f) -> f
+  if !check-readable(base) then return 1
   // Resolved the same way `apply-removes` resolves, so the listing agrees with
   // what actually gets removed.
   p.positional.foreach fn(n)

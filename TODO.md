@@ -8,26 +8,6 @@ Priorities: **high** — wrong results, or a footgun that can cost something;
 
 ## Bugs
 
-### medium — hand-written dependency entries are invisible
-
-`entry-input` recognises an entry only by looking for the literal
-`self.inputs.`. A line in the libs region written any other way — a local
-binding, `builtins.getFlake`, a `let`-bound path — parses as "not an entry", so
-`koki info` does not list it, `koki remove` will not touch it, and `koki doctor`
-reports nothing. A `# koki:libs` region the user can edit freely but koki can
-only half read is worse than one it refuses to edit.
-
-Either parse the general shape, or make the region genuinely machine-owned:
-detect a non-conforming line and report it rather than ignoring it.
-
-### medium — a `flake.nix` with a hand-added input can be miscounted
-
-`flake-input-refs` scans *every* line of the file for `word.word = "string"`,
-because `nixpkgs` sits outside the managed region. That shape occurs elsewhere
-in a flake by coincidence — a `meta` field, a string in a `shellHook`. It
-happens to be clean on all three templates, which is not the same as being
-right. Scoping the scan to the `inputs = { ... }` block would be exact.
-
 ### low — rewriting normalises the final line ending
 
 `koki add` rewrites the whole file from a line list, so a file that ended
@@ -43,9 +23,10 @@ preserving the original ending, or mentioning it in the summary line.
 
 ## Correctness risks
 
-- **`str-after` and `entry-input` agree on `self.inputs.` only.** If the two
-  ever drift, `koki add` writes a shape `koki remove` cannot find again. One
-  constant, used by both, would remove the possibility.
+- **`entry-input` and `registry.kk` agree on `self.inputs.` only.** If the two
+  ever drift, `koki add` writes a shape `koki remove` cannot read; the region
+  is then refused rather than half-edited, so the drift is loud. One constant,
+  used by both, would remove the possibility.
 - **`prompt-settles` treats any empty reply as "take the default".** Correct
   for a yes/no, and it is the one thing standing between a stray newline and a
   wrong answer. It is pinned by tests; keep it that way.

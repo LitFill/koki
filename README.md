@@ -109,8 +109,11 @@ shapes a dependency might publish:
   flake that publishes one. It sets the style and the attribute together.
 
 `koki add` and `koki remove` only ever touch lines between koki's own markers,
-so anything else in the file is left exactly as it was. `koki doctor` reports a
-file that has lost them rather than guessing.
+so anything else in the file is left exactly as it was. The `# koki:libs`
+region is koki's: a line in it that is not an entry is reported by `koki doctor`
+and makes `add` and `remove` refuse, because removing one input would otherwise
+leave the expression that uses it behind. A file that has lost its markers is
+reported the same way rather than guessed at.
 
 ## How the flake stays consistent
 

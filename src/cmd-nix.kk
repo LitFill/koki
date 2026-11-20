@@ -309,7 +309,17 @@ fun flake-checks(f : kflake) : io list<check>
     if orphans.is-empty then []
     else [ broken("dependencies with no flake input: " ++ orphans.map(dep-name).join(", "),
                   "add the matching entry to the inputs region of flake.nix") ]
-  marker ++ dep-check ++ orphan-check
+  // A libs region koki cannot fully read: every line in it is a dependency
+  // `remove` would half-handle, so it is a problem and not advice.
+  val unreadable = flake-unreadable(f)
+  val readable-check =
+    if unreadable.is-empty then []
+    else [ broken("the libs region has " ++ unreadable.length.show
+                    ++ " line" ++ (if unreadable.length == 1 then "" else "s")
+                    ++ " koki cannot read",
+                  "koki only understands `self.inputs.<name>...` lines: "
+                    ++ unreadable.map(_.trim).join(", ")) ]
+  marker ++ dep-check ++ orphan-check ++ readable-check
 
 pub fun cmd-doctor(p : parsed) : io int
   "koki doctor".bold.out-heading
