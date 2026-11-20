@@ -101,6 +101,14 @@ fun emit-all(root : path, files : list<newfile>, dry : bool) : io bool
       if !emit(root, f, dry) then return False
       emit-all(root, tl, dry)
 
+// Stage exactly the files koki wrote, so that Nix can see them without
+// pulling in whatever else the directory holds. `-f` because a directory koki
+// was told to write into (`--force`) may carry a `.gitignore` that would hide
+// one of them, and an untracked file is invisible to `nix build`.
+fun stage(root : path, files : list<newfile>) : io bool
+  val paths = files.map(_.path.str-shquote).join(" ")
+  run-system("git -C %1 add -f -- %2"%^[str-shquote(root.string), paths]) == 0
+
 pub fun cmd-init(p : parsed) : io int
   val dir  = last(p.positional).default(".")
   val root = dir.path
@@ -127,8 +135,9 @@ pub fun cmd-init(p : parsed) : io int
         return 1
 
   val s = Settings(name, a.desc, a.version, a.author, a.license, this-year(), kind)
+  val files = template-files(s)
   out-step("creating a %1 project in %2"%^[kind, root.string])
-  if !emit-all(root, template-files(s), dry) then return 1
+  if !emit-all(root, files, dry) then return 1
   if dry then
     out-ok("dry run: nothing was written")
     return 0
@@ -136,11 +145,21 @@ pub fun cmd-init(p : parsed) : io int
   if flag-on(p, "git", True) then
     // Nix reads a flake through git, so a repository whose files are still
     // untracked makes `koki build` fail with a message about tracking rather
-    // than about the build. Staging here is enough; the commit is the user's.
+    // than about the build. Only the files koki wrote are staged: `add -A` in
+    // a directory that already had a repository would stage whatever else the
+    // user keeps there.
     val quoted = str-shquote(root.string)
-    if run-system("git init -q " ++ quoted) == 0 then
-      if run-system("git -C %1 add -A"%^[quoted]) == 0 then
-        out-ok("initialised a git repository and staged the files")
+    // A repository above `root` does not count: koki only ever creates one
+    // here, and `git init` in a directory that already has one is a no-op.
+    val dot-git = root / ".git"
+    val had-repo = is-directory(dot-git) || is-file(dot-git)
+    val init-rc = if had-repo then 0 else run-system("git init -q " ++ quoted)
+    if init-rc == 0 then
+      if stage(root, files) then
+        val msg =
+          if had-repo then "staged the project files"
+          else "initialised a git repository and staged the files"
+        out-ok(msg)
       else
         out-warn("could not stage the files; `nix build` will not see them until they are added to git")
     else
@@ -150,7 +169,7 @@ pub fun cmd-init(p : parsed) : io int
   // The commit step only makes sense when there is a repository to commit to.
   val commit =
       if   flag-on(p, "git", True)
-      then [ ("commit it", "git add -A && git commit -m 'initial commit'") ]
+      then [ ("commit it", "git commit -m 'initial commit'") ]
       else []
   val steps =
     if dir == "." then

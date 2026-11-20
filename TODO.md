@@ -1,30 +1,12 @@
 # TODO
 
-Grounded in what is actually true of the code as of `0.1.0`. Each item says
+Grounded in what is actually true of the code as of `0.2.0`. Each item says
 what was observed, so a later reader can tell a real defect from a guess.
 
 Priorities: **high** — wrong results, or a footgun that can cost something;
 **medium** — a real limitation someone will hit; **low** — polish.
 
 ## Bugs
-
-### high — `koki init --force` stages unrelated files
-
-`koki init` runs `git -C <dir> add -A` after `git init`, to make the files
-visible to Nix. In a directory that is *already* a repository, that stages
-everything untracked, not just what koki wrote:
-
-```console
-$ git init -q . && echo secret > .env && echo notes > notes.txt
-$ koki init -y --force
-$ git status --short
-A  .env          <- not koki's
-A  notes.txt     <- not koki's
-A  flake.nix
-```
-
-The next `git commit` puts those in history. Only run the `add -A` when koki
-is the one that created the repository, or stage the exact paths it wrote.
 
 ### medium — hand-written dependency entries are invisible
 
