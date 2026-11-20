@@ -166,8 +166,8 @@ fun usage-error(c : command, p : parsed) : io int
 // Apply the presentation flags before anything is printed.
 fun apply-globals(p : parsed) : io ()
   if   p.has("quiet")    then set-quiet(True)
-  if   p.has("no-color") then force-color(False)
-  elif p.has("color")    then force-color(True)
+  if   p.has("no-color") then force-color(Never)
+  elif p.has("color")    then force-color(Always)
 
 pub fun run-args(argv : list<string>) : io int
   match argv

@@ -23,7 +23,12 @@ pub extern flush-out() : console ()
 
 // ---------- capability detection ----------
 
-val color-cache : ref<global, maybe<bool>> = unsafe-total { ref(Nothing) }
+// What `--color` / `--no-color` asked for, before the environment and the
+// terminal decide. `Auto` is the default: let the environment answer.
+pub type color-choice
+  Auto
+  Never
+  Always
 
 // Ask the shell whether file descriptor `fd` is attached to a terminal.
 // `test -t` says yes by exiting zero and printing nothing, so the answer is
@@ -31,25 +36,50 @@ val color-cache : ref<global, maybe<bool>> = unsafe-total { ref(Nothing) }
 fun fd-is-tty(fd : string) : io bool
   run-system("test -t " ++ fd) == 0
 
-fun resolve-color() : io bool
-  match get-env-value("KOKI_COLOR")
-    Just("never")  -> return False
-    Just("0")      -> return False
-    Just("always") -> return True
-    Just("1")      -> return True
+// The environment's decision, as a pure function of the values that matter so
+// the precedence can be tested without a process environment. `NO_COLOR`
+// beats `CLICOLOR_FORCE`, and `TERM=dumb` beats an attached terminal.
+pub fun color-from-env(
+  koki     : maybe<string>,
+  no-color : bool,
+  force    : bool,
+  term     : maybe<string>,
+  tty      : bool
+) : bool
+  match koki
+    Just("never")  -> False
+    Just("0")      -> False
+    Just("always") -> True
+    Just("1")      -> True
     _ ->
-      if get-env-value("NO_COLOR").is-just       then return False
-      if get-env-value("CLICOLOR_FORCE").is-just then return True
-      match get-env-value("TERM")
-        Just("dumb") -> return False
-        _            -> return fd-is-tty("1")
+      if   no-color then False
+      elif force    then True
+      else match term
+        Just("dumb") -> False
+        _            -> tty
+
+// The environment plus the terminal. One shell spawn for the tty probe.
+fun env-color() : io bool
+  color-from-env(get-env-value("KOKI_COLOR"),
+                 get-env-value("NO_COLOR").is-just,
+                 get-env-value("CLICOLOR_FORCE").is-just,
+                 get-env-value("TERM"),
+                 fd-is-tty("1"))
+
+pub fun resolve-color(choice : color-choice) : io bool
+  match choice
+    Never  -> False
+    Always -> True
+    Auto   -> env-color()
+
+val color-cache : ref<global, maybe<bool>> = unsafe-total { ref(Nothing) }
 
 // Should we emit ANSI escape sequences?
 pub fun term-color() : io bool
   match !color-cache
     Just(b) -> b
     Nothing ->
-      val b = resolve-color()
+      val b = resolve-color(Auto)
       color-cache := Just(b)
       b
 
@@ -61,8 +91,12 @@ pub fun term-interactive() : io bool
   tty.force
 
 // Force the colour decision, for `--color` and `--no-color`.
-pub fun force-color(b : bool) : io ()
-  color-cache := Just(b)
+pub fun force-color(choice : color-choice) : io ()
+  val forced = match choice
+    Never  -> Just(False)
+    Always -> Just(True)
+    Auto   -> Nothing
+  color-cache := forced
 
 val quiet-cache : ref<global, bool> = unsafe-total { ref(False) }
 

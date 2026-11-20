@@ -109,6 +109,32 @@ fun stage(root : path, files : list<newfile>) : io bool
   val paths = files.map(_.path.str-shquote).join(" ")
   run-system("git -C %1 add -f -- %2"%^[str-shquote(root.string), paths]) == 0
 
+// Make the project visible to Nix through git and report what happened:
+// `Nothing` when koki left git alone (`--no-git`, or git could not run),
+// `Just(b)` when a repository exists and `b` says whether the project files
+// are staged. Nix reads a flake through git, so untracked files make
+// `koki build` fail with a message about tracking rather than about the build.
+// Only the files koki wrote are staged: `add -A` in a directory that already
+// had a repository would stage whatever else the user keeps there.
+fun init-git(root : path, files : list<newfile>, enabled : bool) : io maybe<bool>
+  if !enabled then return Nothing
+  val quoted = str-shquote(root.string)
+  // A repository above `root` does not count: koki only ever creates one here,
+  // and `git init` in a directory that already has one is a no-op.
+  val dot-git = root / ".git"
+  val had-repo = is-directory(dot-git) || is-file(dot-git)
+  val init-rc = if had-repo then 0 else run-system("git init -q " ++ quoted)
+  if init-rc != 0 then
+    out-warn("could not run `git init`; the rest of the project is complete")
+    return Nothing
+  val staged = stage(root, files)
+  if staged then
+    out-ok(if had-repo then "staged the project files"
+                      else "initialised a git repository and staged the files")
+  else
+    out-warn("could not stage the files; `nix build` will not see them until they are added to git")
+  Just(staged)
+
 pub fun cmd-init(p : parsed) : io int
   val dir  = last(p.positional).default(".")
   val root = dir.path
@@ -142,35 +168,14 @@ pub fun cmd-init(p : parsed) : io int
     out-ok("dry run: nothing was written")
     return 0
 
-  if flag-on(p, "git", True) then
-    // Nix reads a flake through git, so a repository whose files are still
-    // untracked makes `koki build` fail with a message about tracking rather
-    // than about the build. Only the files koki wrote are staged: `add -A` in
-    // a directory that already had a repository would stage whatever else the
-    // user keeps there.
-    val quoted = str-shquote(root.string)
-    // A repository above `root` does not count: koki only ever creates one
-    // here, and `git init` in a directory that already has one is a no-op.
-    val dot-git = root / ".git"
-    val had-repo = is-directory(dot-git) || is-file(dot-git)
-    val init-rc = if had-repo then 0 else run-system("git init -q " ++ quoted)
-    if init-rc == 0 then
-      if stage(root, files) then
-        val msg =
-          if had-repo then "staged the project files"
-          else "initialised a git repository and staged the files"
-        out-ok(msg)
-      else
-        out-warn("could not stage the files; `nix build` will not see them until they are added to git")
-    else
-      out-warn("could not run `git init`; the rest of the project is complete")
-
+  val git = init-git(root, files, flag-on(p, "git", True))
   out-ok("created %1 (%2)"%^[bold(name), kind])
-  // The commit step only makes sense when there is a repository to commit to.
+  // The commit step only makes sense when a repository exists and its files
+  // are staged; a failed `git init` must not leave a `git commit` hint behind.
   val commit =
-      if   flag-on(p, "git", True)
-      then [ ("commit it", "git commit -m 'initial commit'") ]
-      else []
+    match git
+      Just(True) -> [ ("commit it", "git commit -m 'initial commit'") ]
+      _          -> []
   val steps =
     if dir == "." then
       [ ("enter the dev shell", "koki dev"),
@@ -213,27 +218,51 @@ pub struct addition
   style  : string
   entry  : string
 
-// Apply a list of additions to the flake text, one at a time so each one sees
-// the file the previous one produced.
-fun apply-adds(
-  text : string,
-  adds : list<addition>,
-  done : list<string>,
-  bad  : list<string>
+// One dependency edit: the flake attribute, what to call it in messages (the
+// user's spelling), and the two fields only an addition uses.
+pub struct edit
+  name  : string
+  input : string
+  ref   : string
+  entry : string
+
+// Which way an edit goes.
+pub type edit-direction
+  Adding
+  Removing
+
+// Apply edits one at a time, so each sees the file the previous one produced.
+// The third result is the edits that did not apply, in the order they were
+// given: an addition that is already there, or a removal that is not.
+pub fun apply-edits(
+  text    : string,
+  edits   : list<edit>,
+  dir     : edit-direction,
+  done    : list<string>,
+  skipped : list<string>
 ) : io (string, list<string>, list<string>)
-  match adds
-    Nil -> return (text, done, bad)
-    Cons(a, tl) ->
+  match edits
+    Nil -> (text, done, skipped)
+    Cons(e, tl) ->
       val f = match parse-flake(text)
+        Just(x) -> x
         Nothing ->
           out-error("flake.nix stopped being parseable partway through; nothing was written")
-          return (text, done, bad ++ [ a.input ])
-        Just(x) -> x
-      if f.flake-has(a.input) then
-        out-warn(a.input ++ " is already a dependency")
-        apply-adds(text, tl, done, bad ++ [ a.input ])
-      else
-        apply-adds(flake-add(f, a.input, a.source, a.entry), tl, done ++ [ a.input ], bad)
+          return (text, done, skipped ++ [ e.name ])
+      val present = f.flake-has(e.input)
+      match dir
+        Adding ->
+          if present then
+            out-warn(e.input ++ " is already a dependency")
+            apply-edits(text, tl, dir, done, skipped ++ [ e.name ])
+          else
+            apply-edits(flake-add(f, e.input, e.ref, e.entry), tl, dir,
+                        done ++ [ e.name ], skipped)
+        Removing ->
+          if present then
+            apply-edits(flake-remove(f, e.input), tl, dir, done ++ [ e.name ], skipped)
+          else
+            apply-edits(text, tl, dir, done, skipped ++ [ e.name ])
 
 fun describe-add(a : addition) : io ()
   out-item(bold(a.input) ++ "  " ++ dim(a.source))
@@ -281,7 +310,8 @@ pub fun cmd-add(p : parsed) : io int
 
   }
   val text = read-if-there(root/"flake.nix").default("")
-  val (newtext, done, bad) = apply-adds(text, adds, [], [])
+  val edits = adds.map fn(a) Edit(a.input, a.input, a.source, a.entry)
+  val (newtext, done, bad) = apply-edits(text, edits, Adding, [], [])
   if bad != [] && done.is-empty             then return 1
   if !write-file(root/"flake.nix", newtext) then return 1
   if done.is-empty then
@@ -305,30 +335,6 @@ pub val remove-args : list<argdef> = [
   arg-switch("yes",     "y", "do not ask for confirmation"),
 ]
 
-pub fun apply-removes(
-  text    : string,
-  names   : list<string>,
-  done    : list<string>,
-  missing : list<string>
-) : io (string, list<string>, list<string>)
-  match names
-    Nil         -> (text, done, missing)
-    Cons(n, tl) ->
-      // `koki add` files a dependency under the name `resolve` derives from
-      // the spelling the user typed, so `koki add LitFill/nel-kk` lands as the
-      // input `nel-kk`. Resolving the same way here is what makes the name a
-      // dependency was added with also the name it can be removed with.
-      val input = resolve(n, Nothing, Nothing).fst
-      val f = match parse-flake(text)
-        Just(x) -> x
-        Nothing ->
-          out-error("flake.nix stopped being parseable partway through; nothing was written")
-          return (text, done, missing ++ [ n ])
-      if f.flake-has(input) then
-        apply-removes(flake-remove(f, input), tl, done ++ [ n ], missing)
-      else
-        apply-removes(text, tl, done, missing ++ [ n ])
-
 pub fun cmd-remove(p : parsed) : io int
   if p.positional.is-empty then
     out-error("`koki remove` needs at least one dependency")
@@ -345,8 +351,8 @@ pub fun cmd-remove(p : parsed) : io int
     Nothing -> return fail("flake.nix is not a koki project", "the koki marker regions are missing")
     Just(f) -> f
   if !check-readable(base) then return 1
-  // Resolved the same way `apply-removes` resolves, so the listing agrees with
-  // what actually gets removed.
+  // Resolved the same way the listing above resolves, so the edit lands on
+  // the input the dependency was added under.
   p.positional.foreach fn(n)
     if base.flake-has(resolve(n, Nothing, Nothing).fst) then out-item("remove  " ++ bold(n))
     else out-warn(n ++ " is not a dependency of this project")
@@ -360,7 +366,9 @@ pub fun cmd-remove(p : parsed) : io int
       out-warn("cancelled")
       return 1
 
-  val (newtext, done, missing) = apply-removes(text, p.positional, [], [])
+  val edits = p.positional.map fn(n)
+    Edit(n, resolve(n, Nothing, Nothing).fst, "", "")
+  val (newtext, done, missing) = apply-edits(text, edits, Removing, [], [])
   if done.is-empty then
     out-warn("nothing changed")
     return 0

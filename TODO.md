@@ -34,19 +34,14 @@ Priorities: **high** — wrong results, or a footgun that can cost something;
 - **No end-to-end test that builds a generated project.** The templates are
   verified by hand, not by CI. A check that runs `koki init -t lib`, adds it to
   a scratch project as a `path:` input and builds would close the loop.
-- **No test for the colour decision.** `KOKI_COLOR`, `NO_COLOR`, `TERM=dumb`
-  and non-tty are all reachable and none are pinned.
 
 ## Code
 
-- **`apply-adds` and `apply-removes` in `src/cmd-project.kk` are near
-  duplicates** — same shape, opposite direction. One function with a direction
-  would be shorter and harder to get half-right.
 - **`src/templates.kk` is 448 lines of `++`.** One file per template, or a
   heredoc-style helper, would make the generated flakes readable as flakes
   rather than as concatenations. The `#{` escaping in particular costs more to
   read than the Nix it produces.
-- **`apply-adds` re-parses and re-splices the file once per dependency**, and
+- **`apply-edits` re-parses and re-splices the file once per dependency**, and
   `splice` is built from `take`/`drop`, so adding *n* dependencies is O(n²) in
   the file length. Fine at this size; worth knowing before anyone adds ten.
 - **The `command` record holds a function, so calling it needs `(c.action)(p)`.**

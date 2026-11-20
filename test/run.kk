@@ -156,6 +156,34 @@ val term-checks : list<result> = [
   check("whitespace does not settle", !prompt-settles("  ")),
 ]
 
+// ---------- colour ----------
+
+// The precedence is a decision table, not a ladder of side effects: the
+// environment answer is pure in its arguments, so every branch is pinned.
+fun color-checks() : io list<result>
+  [
+    check("KOKI_COLOR=never wins over a terminal",
+          !color-from-env(Just("never"), False, True, Nothing, True)),
+    check("KOKI_COLOR=0 is off",
+          !color-from-env(Just("0"), False, False, Nothing, True)),
+    check("KOKI_COLOR=always wins over NO_COLOR",
+          color-from-env(Just("always"), True, False, Nothing, False)),
+    check("KOKI_COLOR=1 is on",
+          color-from-env(Just("1"), False, False, Nothing, False)),
+    check("NO_COLOR beats CLICOLOR_FORCE",
+          !color-from-env(Nothing, True, True, Nothing, True)),
+    check("CLICOLOR_FORCE beats an absent terminal",
+          color-from-env(Nothing, False, True, Nothing, False)),
+    check("TERM=dumb beats a terminal",
+          !color-from-env(Nothing, False, False, Just("dumb"), True)),
+    check("a terminal decides when nothing else does",
+          color-from-env(Nothing, False, False, Nothing, True)),
+    check("a pipe is colourless",
+          !color-from-env(Nothing, False, False, Nothing, False)),
+    check("the Never choice is off", resolve-color(Never) == False),
+    check("the Always choice is on", resolve-color(Always) == True),
+  ]
+
 // ---------- registry ----------
 
 val nel : (string, string, string, string) = ("nel-kk", "github:LitFill/nel-kk", "nonempty", "kokaLibraries")
@@ -343,26 +371,43 @@ fun region-checks() : div list<result>
           has-input(fresh, "nixpkgs")),
   ]
 
-// ---------- removing a dependency ----------
+// ---------- dependency edits ----------
 //
 // `koki add` derives an input name from whatever spelling it is given, so the
 // name a dependency is filed under is not the name the user typed. Removal has
 // to land on that same name, or a dependency added as `LitFill/nel-kk` cannot
-// be removed by the name it was added with.
+// be removed by the name it was added with. Both directions go through
+// `apply-edits`, so both are checked here.
 
-fun remove-checks() : io list<result>
-  val base = render-flake(demo)
-  val added = flake-add(parse-or-die(base), "nel-kk", "github:LitFill/nel-kk",
-                        entry-for("nel-kk", "packages", "default"))
+// The edit `koki remove <name>` would make for one spelling of a dependency.
+fun remove-edit(name : string) : edit
+  Edit(name, resolve(name, Nothing, Nothing).fst, "", "")
+
+val added-edit : edit =
+  Edit("nel-kk", "nel-kk", "github:LitFill/nel-kk",
+       entry-for("nel-kk", "kokaLibraries", "nonempty"))
+
+fun edit-checks() : io list<result>
+  val base    = render-flake(demo)
+  val added   = flake-add(parse-or-die(base), "nel-kk", "github:LitFill/nel-kk",
+                          entry-for("nel-kk", "packages", "default"))
+  val applied = apply-edits(base, [ added-edit ], Adding, [], [])
   [
+    check("an addition is applied",
+          applied.snd == [ "nel-kk" ] && applied.thd.is-empty),
+    check("an addition writes a dependency",
+          parse-or-die(applied.fst).flake-has("nel-kk")),
+    check("adding the same dependency twice skips it",
+          apply-edits(applied.fst, [ added-edit ], Adding, [], []).thd == [ "nel-kk" ]),
     check("a dependency added by full ref is removable by full ref",
-          apply-removes(added, [ "LitFill/nel-kk" ], [], []).snd == [ "LitFill/nel-kk" ]),
+          apply-edits(added, [ remove-edit("LitFill/nel-kk") ], Removing, [], []).snd
+            == [ "LitFill/nel-kk" ]),
     check("a dependency added by full ref is removable by bare name",
-          apply-removes(added, [ "nel-kk" ], [], []).snd == [ "nel-kk" ]),
+          apply-edits(added, [ remove-edit("nel-kk") ], Removing, [], []).snd == [ "nel-kk" ]),
     check("removal by full ref restores the file exactly",
-          apply-removes(added, [ "LitFill/nel-kk" ], [], []).fst == base),
+          apply-edits(added, [ remove-edit("LitFill/nel-kk") ], Removing, [], []).fst == base),
     check("a dependency that is not there is reported missing",
-          apply-removes(added, [ "nope" ], [], []).thd == [ "nope" ]),
+          apply-edits(added, [ remove-edit("nope") ], Removing, [], []).thd == [ "nope" ]),
   ]
 
 // ---------- the include path ----------
@@ -422,10 +467,10 @@ fun repl-checks() : div list<result>
 // Run `koki <args>` with `dir` as the working directory, returning the exit
 // status and everything it printed. `args` is a shell fragment rather than a
 // quoted string, so a caller can pass an argument that needs quoting.
-fun koki-in(bin : string, dir : string, args : string) : io (int, string)
+fun koki-in(bin : string, dir : string, args : string, env : string = "") : io (int, string)
   val log = dir ++ "/.koki-out"
-  val rc  = run-system("cd %1 && %2 %3 > %4 2>&1"
-                      %^[str-shquote(dir), str-shquote(bin), args, str-shquote(log)])
+  val rc  = run-system("cd %1 && %2 %3 %4 > %5 2>&1"
+                      %^[str-shquote(dir), env, str-shquote(bin), args, str-shquote(log)])
   val out = match try fn() { log.path.read-text-file }
     Ok(s)    -> s
     Error(_) -> ""
@@ -499,6 +544,11 @@ fun dispatch-checks() : io list<result>
   val remove-hand = koki-in(bin, d6 ++ "/hand", "remove --yes nel-kk")
   val add-hand    = koki-in(bin, d6 ++ "/hand", "add --yes nel-kk")
 
+  // With no git on the PATH the repository cannot be made, and the footer
+  // must not offer a commit there is nothing to commit to.
+  val d7 = scratch-dir()
+  val no-git = koki-in(bin, d7, "new --yes demo", "PATH=")
+
   // Doctor has somewhere to stand and no project to stand in.
   val doctor-none = koki-in(bin, d0, "doctor")
 
@@ -555,14 +605,20 @@ fun dispatch-checks() : io list<result>
           add-hand.fst == 1 && add-hand.snd.contains("libs region")),
     check("the refused edit leaves the flake alone",
           file-has(d6, "hand/flake.nix", "./extra")),
+    check("a missing git is reported and no commit is offered",
+          no-git.fst == 0
+            && no-git.snd.contains("could not run `git init`")
+            && !no-git.snd.contains("commit it")),
+    check("the project is created even without git",
+          project-file(d7, "demo/flake.nix")),
   ]
 
 // ---------- runner ----------
 
 fun main() : io ()
-  val rs = strutil-checks() ++ arg-checks() ++ term-checks ++ registry-checks()
-             ++ template-checks() ++ model-checks() ++ region-checks()
-             ++ remove-checks() ++ repl-checks()
+  val rs = strutil-checks() ++ arg-checks() ++ term-checks ++ color-checks()
+             ++ registry-checks() ++ template-checks() ++ model-checks() ++ region-checks()
+             ++ edit-checks() ++ repl-checks()
              ++ dispatch-checks()
   rs.foreach fn(r) {
     ((if r.ok then "ok    " else "FAIL  ") ++ r.name).println
