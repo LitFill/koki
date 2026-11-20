@@ -6,21 +6,6 @@ what was observed, so a later reader can tell a real defect from a guess.
 Priorities: **high** — wrong results, or a footgun that can cost something;
 **medium** — a real limitation someone will hit; **low** — polish.
 
-## Bugs
-
-### low — rewriting normalises the final line ending
-
-`koki add` rewrites the whole file from a line list, so a file that ended
-without a newline gains one:
-
-```diff
--}          <- no trailing newline
-+}
-```
-
-Benign, and arguably a fix, but it is a change koki did not announce. Consider
-preserving the original ending, or mentioning it in the summary line.
-
 ## Correctness risks
 
 - **`entry-input` and `registry.kk` agree on `self.inputs.` only.** If the two
@@ -103,19 +88,19 @@ preserving the original ending, or mentioning it in the summary line.
 - **POSIX shell throughout** — `run-system`, `test -t`, `printf` in the
   generated `shellHook`, and the quoting in `str-shquote`. Linux and macOS are
   fine; Windows is not supported, and the flake does not claim it.
-- **`koki init --force` overwrites without showing what it will change.**
-  Given the staging bug above, a diff before overwriting would also be a
-  safety net.
+- **`koki init --force` overwrites without showing what it will change.** A
+  diff before overwriting would be a safety net.
 - **A `nix flake lock` failure scrolls past.** koki reports that it failed and
   suggests running it by hand, which is right, but the reason is not shown.
+- **`koki info` evaluates the flake.** The version row is a `nix eval`, so the
+  command is as slow as Nix and needs the inputs available; it falls back to
+  `(not evaluated)` offline, and `--no-write-lock-file` keeps it from leaving a
+  `flake.lock` behind.
 
 ## Packaging
 
 - **No CI.** `checks` is wired up and green locally; nothing runs it on push.
   The other repos in this workspace use flake-utils' GitHub matrix, which is
   the obvious thing to copy.
-- **`koki --version` is a literal in `src/cli.kk`** and the version is repeated
-  in `flake.nix` three times — `version`, `passthru.version`, and the test
-  derivation. They can drift.
 - **No release process.** No tags, no `nix profile install` instructions
   verified against a real tag, no changelog.

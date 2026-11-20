@@ -257,6 +257,17 @@ fun hand-edited-round-trip() : div string
                         entry-for("nel-kk", "kokaLibraries", "nonempty"))
   flake-remove(parse-or-die(added), "nel-kk")
 
+// A flake that ends without a newline. `str-lines` drops the trailing empty
+// field, so joining without one reproduces the file minus its final newline.
+fun no-final-newline() : string
+  render-flake(demo).str-lines.join("\n")
+
+fun no-final-newline-round-trip() : div string
+  val added = flake-add(parse-or-die(no-final-newline()), "nel-kk",
+                        "github:LitFill/nel-kk",
+                        entry-for("nel-kk", "kokaLibraries", "nonempty"))
+  flake-remove(parse-or-die(added), "nel-kk")
+
 fun has-input(f : kflake, want : string) : div bool
   f.flake-input-refs.any fn(r) r.name == want
 
@@ -292,6 +303,11 @@ fun model-checks() : div list<result>
               ++ "/share/koka/" ++ nix-dollar ++ "{pkgs.koka.version}\"")),
     check("both dependencies survive together",
           with-two().flake-deps.length == 2 && with-two-text().contains("kokaLibraries")),
+    check("a flake that ends without a newline is read as such",
+          !parse-or-die(no-final-newline()).newline),
+    check("a rewrite keeps a missing final newline",
+          no-final-newline-round-trip() == no-final-newline()),
+    check("a normal flake keeps its final newline", fresh.newline),
   ]
 
 // ---------- the managed regions ----------

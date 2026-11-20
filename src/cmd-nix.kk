@@ -147,9 +147,12 @@ pub val repl-args : list<argdef> = []
 // than the text being parsed, so this stays right when the version is only
 // defaulted somewhere in the expression.
 fun built-version(root : path) : io maybe<string>
-  val cmd = "cd " ++ root.string ++
-            " && s=$(nix eval --impure --raw --expr builtins.currentSystem)" ++
-            " && nix eval --raw .#packages.$s.default.version 2>/dev/null"
+  // `--no-write-lock-file`: asking Nix for the version must not leave a
+  // flake.lock behind in a project that never had one. The directory is
+  // quoted because a project path may contain a space.
+  val cmd = "cd " ++ str-shquote(root.string) ++
+            " && s=$(nix eval --no-write-lock-file --impure --raw --expr builtins.currentSystem)" ++
+            " && nix eval --no-write-lock-file --raw .#packages.$s.default.version 2>/dev/null"
   match run-system-read(cmd)
     Ok(s)    -> if s.trim.is-empty then Nothing else Just(s.trim)
     Error(_) -> Nothing

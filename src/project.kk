@@ -42,11 +42,13 @@ pub struct kblock
   start : int
   stop  : int
 
-// A parsed `flake.nix`.
+// A parsed `flake.nix`. `newline` records whether the file ended with one, so
+// a rewrite does not silently add or remove it.
 pub struct kflake
-  ls     : list<string>
-  inputs : kblock
-  libs   : kblock
+  ls      : list<string>
+  inputs  : kblock
+  libs    : kblock
+  newline : bool
 
 // ---------- line plumbing ----------
 
@@ -78,8 +80,9 @@ fun read-block(
 fun splice(ls : list<string>, b : kblock, body : list<string>) : list<string>
   ls.take(b.start + 1) ++ body ++ ls.drop(b.stop)
 
-fun render(ls : list<string>) : string
-  ls.join("\n") ++ "\n"
+fun render(ls : list<string>, newline : bool) : string
+  val body = ls.join("\n")
+  if newline then body ++ "\n" else body
 
 // ---------- parsing ----------
 
@@ -113,7 +116,7 @@ pub fun parse-flake(text : string) : maybe<kflake>
     Nothing      -> Nothing
     Just(inputs) -> match read-block(ls, libs-start, libs-end)
       Nothing    -> Nothing
-      Just(libs) -> Just(Kflake(ls, inputs, libs))
+      Just(libs) -> Just(Kflake(ls, inputs, libs, str-ends-with(text, "\n")))
 
 // ---------- reading dependencies ----------
 
@@ -226,7 +229,7 @@ pub fun flake-add(f : kflake, input : string, ref : string, entry : string) : di
   val ls2 = match read-block(ls1, libs-start, libs-end)
     Nothing    -> ls1
     Just(libs) -> splice(ls1, libs, libs.body ++ [ entry-line(entry) ])
-  render(ls2)
+  render(ls2, f.newline)
 
 // Remove a dependency from both regions and return the new file text.
 pub fun flake-remove(f : kflake, input : string) : div string
@@ -234,7 +237,7 @@ pub fun flake-remove(f : kflake, input : string) : div string
   val ls2 = match read-block(ls1, libs-start, libs-end)
     Nothing    -> ls1
     Just(libs) -> splice(ls1, libs, drop-entry(libs.body, input))
-  render(ls2)
+  render(ls2, f.newline)
 
 // ---------- locating a project ----------
 
