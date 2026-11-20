@@ -101,5 +101,6 @@ Priorities: **high** — wrong results, or a footgun that can cost something;
 - **No CI.** `checks` is wired up and green locally; nothing runs it on push.
   The other repos in this workspace use flake-utils' GitHub matrix, which is
   the obvious thing to copy.
-- **No release process.** No tags, no `nix profile install` instructions
-  verified against a real tag, no changelog.
+- **No release checklist.** Tags and a changelog exist; nothing verifies
+  `nix profile install github:LitFill/koki` against a tag or builds the tagged
+  source in CI.
