@@ -206,40 +206,74 @@ pub val info-args : list<argdef> = []
 
 // ---------- doctor ----------
 
-// A check result. `level` is 0 for fine, 1 for advice, 2 for a problem that
-// makes koki useless until it is fixed.
+// How one doctor check came out.
+pub type check-level
+  Good
+  Advice
+  Bad
+
 pub struct check
   label : string
-  level : int
+  level : check-level
   help  : string
 
 fun fine(label : string) : check
-  Check(label, 0, "")
+  Check(label, Good, "")
 
 fun advice(label : string, help : string) : check
-  Check(label, 1, help)
+  Check(label, Advice, help)
 
 fun broken(label : string, help : string) : check
-  Check(label, 2, help)
+  Check(label, Bad, help)
 
 fun render-checks(cs : list<check>) : io ()
   cs.foreach fn(c)
     val mark = match c.level
-      0 -> "✔".green
-      1 -> "!".yellow
-      _ -> "✖".red
+      Good   -> "✔".green
+      Advice -> "!".yellow
+      Bad    -> "✖".red
     println(mark ++ " " ++ c.label)
     if !c.help.is-empty then out-hint(c.help)
 
-fun count-broken(cs : list<check>) : int
+fun count-bad(cs : list<check>) : int
   match cs
     Nil          -> 0
-    Cons(hd, tl) -> (if hd.level >= 2 then 1 else 0) + count-broken(tl)
+    Cons(hd, tl) -> match hd.level
+      Bad -> 1 + count-bad(tl)
+      _   -> count-bad(tl)
 
 fun count-advice(cs : list<check>) : int
   match cs
-    Nil -> 0
-    Cons(hd, tl) -> (if hd.level == 1 then 1 else 0) + count-advice(tl)
+    Nil          -> 0
+    Cons(hd, tl) -> match hd.level
+      Advice -> 1 + count-advice(tl)
+      _      -> count-advice(tl)
+
+// The doctor's overall state. The summary line, the exit code and any caller
+// read this one value, so they cannot disagree about what the checks said.
+pub type verdict
+  AllGood
+  Warnings(count : int)
+  Problems(count : int)
+
+pub fun verdict-of(cs : list<check>) : verdict
+  val bad = count-bad(cs)
+  if bad > 0 then Problems(bad)
+  else
+    val warn = count-advice(cs)
+    if warn > 0 then Warnings(warn) else AllGood
+
+fun render-verdict(v : verdict) : io int
+  match v
+    AllGood ->
+      out-ok("everything checks out")
+      0
+    Warnings(n) ->
+      out-warn(n.show ++ " thing" ++ (if n == 1 then "" else "s") ++ " to look at")
+      0
+    Problems(n) ->
+      out-error(n.show ++ " problem" ++ (if n == 1 then "" else "s") ++ " to fix")
+      1
 
 fun toolchain-checks() : io list<check>
   val nix-check =
@@ -356,13 +390,9 @@ pub fun cmd-doctor(p : parsed) : io int
   render-checks(proj)
 
   out-blank()
-  val all  = tool ++ proj
-  val bad  = count-broken(all)
-  val warn = count-advice(all)
-  if   bad == 0 && warn == 0 then out-ok("everything checks out")
-  elif bad == 0 then out-warn(warn.show ++ " thing" ++ (if warn == 1 then "" else "s") ++ " to look at")
-  else out-error(bad.show ++ " problem" ++ (if bad == 1 then "" else "s") ++ " to fix")
+  val v  = verdict-of(tool ++ proj)
+  val rc = render-verdict(v)
   out-blank()
-  if bad == 0 then 0 else 1
+  rc
 
 pub val doctor-args : list<argdef> = []
