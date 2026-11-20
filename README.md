@@ -149,7 +149,7 @@ There is no third place to update.
 
 ```console
 $ koki dev        # a shell with koka on the PATH
-$ koka -o koki main.kk
+$ koka -o koki main.kk   # the dispatch tests run this binary
 $ koki check      # builds, and runs test/run.kk
 ```
 

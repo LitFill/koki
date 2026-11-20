@@ -143,6 +143,9 @@
 
             buildPhase = ''
               runHook preBuild
+              # The dispatch checks run the real binary, so it is built here
+              # from the same source as the package.
+              koka ${kokaLibArgs pkgs} -o koki main.kk
               koka ${kokaLibArgs pkgs} -o test-bin test/run.kk
               ./test-bin
               runHook postBuild

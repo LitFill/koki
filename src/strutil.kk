@@ -158,20 +158,24 @@ pub fun str-sanitize-name(s : string) : string
 
 // ---------- distances ----------
 
-// One row of the Levenshtein matrix, computed left to right. `left` is the cell
-// immediately to the left, `diag` the cell above and to the left; carrying them
-// through the recursion keeps every row linear.
+// One row of the Levenshtein matrix, computed left to right. `prev` is the
+// row above, `left` the cell just written: each cell is the cheapest of
+// deleting, inserting or matching the character it adds.
 fun lev-aux(prev : list<int>, x : char, ys : list<char>, j : int,
-            left : int, diag : int, out : list<int>) : list<int>
+            left : int, out : list<int>) : list<int>
   match ys
     Nil -> out
     Cons(y, tl) ->
-      val above = prev[j].default(0)
-      val cell = min(above + 1, min(left + 1, diag + (if x == y then 0 else 1)))
-      lev-aux(prev, x, tl, j + 1, cell, above, out ++ [ cell ])
+      val above = prev[j + 1].default(0)
+      val diag  = prev[j].default(0)
+      val cell  = min(above + 1, min(left + 1, diag + (if x == y then 0 else 1)))
+      lev-aux(prev, x, tl, j + 1, cell, out ++ [ cell ])
 
+// A row has one cell per character of `ys`, plus the cell for the empty
+// prefix, which is the cost of deleting the characters of `x` seen so far.
 fun lev-row(prev : list<int>, x : char, ys : list<char>) : list<int>
-  lev-aux(prev, x, ys, 0, 0, 0, [])
+  val first = prev[0].default(0) + 1
+  first.Cons(lev-aux(prev, x, ys, 0, first, []))
 
 // The first row of the matrix: 0, 1, 2, ... n.
 fun index-row(n : int) : div list<int>

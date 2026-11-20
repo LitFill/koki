@@ -8,6 +8,12 @@
 
 module test/run
 
+import std/os/dir
+import std/os/file
+import std/os/path
+import std/os/process
+import util
+
 import src/args
 import src/cmd-nix
 import src/cmd-project
@@ -69,6 +75,12 @@ fun strutil-checks() : div list<result>
           str-distance("kitten", "sitting") == str-distance("sitting", "kitten")),
     check("distance handles an empty left", str-distance("", "abc") == 3),
     check("distance handles an empty right", str-distance("abc", "") == 3),
+    check("distance counts two edits", str-distance("kitten", "sitting") == 3),
+    check("distance counts a transposition as two", str-distance("biuld", "build") == 2),
+    check("distance is not fooled by a shared first letter",
+          str-distance("biuld", "add") == 4),
+    check("closest prefers the real word over a shorter one",
+          str-closest("biuld", [ "init", "new", "add", "remove", "build" ]) == Just("build")),
     check("closest suggests the near name", str-closest("--nme", [ "--name", "--yes" ]) == Just("--name")),
     check("closest gives up on nonsense", str-closest("zzzzzz", [ "init", "build" ]) == Nothing),
 
@@ -349,11 +361,140 @@ fun repl-checks() : div list<result>
             == [ "--include=" ++ store-dir ]),
   ]
 
+// ---------- dispatch ----------
+//
+// Everything above tests functions. These run the built binary, because the
+// argument-to-command mapping, the help text and the error messages only
+// exist as a program: a `set-opt` that lost the project name would still pass
+// every check that only looked at `parse-args`. The `checks` derivation
+// builds `./koki` from the same source before running this suite; locally,
+// `koka -o koki main.kk` first.
+
+// Run `koki <args>` with `dir` as the working directory, returning the exit
+// status and everything it printed. `args` is a shell fragment rather than a
+// quoted string, so a caller can pass an argument that needs quoting.
+fun koki-in(bin : string, dir : string, args : string) : io (int, string)
+  val log = dir ++ "/.koki-out"
+  val rc  = run-system("cd %1 && %2 %3 > %4 2>&1"
+                      %^[str-shquote(dir), str-shquote(bin), args, str-shquote(log)])
+  val out = match try fn() { log.path.read-text-file }
+    Ok(s)    -> s
+    Error(_) -> ""
+  (rc, out)
+
+// A directory of the suite's own, so no check can leave anything behind.
+fun scratch-dir() : io string
+  match run-system-read("mktemp -d")
+    Ok(s)    -> s.trim
+    Error(_) -> "."
+
+fun project-file(dir : string, name : string) : io bool
+  is-file((dir ++ "/" ++ name).path)
+
+fun file-has(dir : string, name : string, needle : string) : io bool
+  match try fn() { (dir ++ "/" ++ name).path.read-text-file }
+    Ok(s)    -> s.contains(needle)
+    Error(_) -> False
+
+fun dispatch-checks() : io list<result>
+  val bin = cwd().string ++ "/koki"
+
+  // Help, version and dispatch. None of these touch the filesystem.
+  val d0 = scratch-dir()
+  val usage     = koki-in(bin, d0, "")
+  val version   = koki-in(bin, d0, "--version")
+  val help      = koki-in(bin, d0, "help")
+  val help-add  = koki-in(bin, d0, "help add")
+  val help-help = koki-in(bin, d0, "help help")
+  val typo      = koki-in(bin, d0, "biuld")
+  val bad-opt   = koki-in(bin, d0, "init --nme x")
+
+  // Errors that need no project.
+  val new-noname = koki-in(bin, d0, "new")
+  val add-none   = koki-in(bin, d0, "add")
+  val rm-none    = koki-in(bin, d0, "remove")
+
+  // A project, created and read back through the commands that read one.
+  val d1 = scratch-dir()
+  val new-bin = koki-in(bin, d1, "new --yes --no-git demo")
+  val info    = koki-in(bin, d1 ++ "/demo", "info")
+  val doctor  = koki-in(bin, d1 ++ "/demo", "doctor")
+
+  // The library template.
+  val d2 = scratch-dir()
+  val new-lib = koki-in(bin, d2, "new --yes --no-git -t lib my-lib")
+
+  // A name no project can have, a template that does not exist, a directory
+  // that already holds something, and a run that writes nothing.
+  val d3 = scratch-dir()
+  val bad-name = koki-in(bin, d3, "new --yes --no-git \"My App\"")
+  val bad-kind = koki-in(bin, d3, "new --yes --no-git -t nope thing")
+  val d4 = scratch-dir()
+  match try fn() { (d4 ++ "/keep").path.write-text-file("keep") }
+    Ok(_)    -> ()
+    Error(_) -> ()
+  val non-empty = koki-in(bin, d4, "init --yes --no-git")
+  val d5 = scratch-dir()
+  val dry = koki-in(bin, d5, "init --yes --no-git --dry-run app")
+
+  // Doctor has somewhere to stand and no project to stand in.
+  val doctor-none = koki-in(bin, d0, "doctor")
+
+  [
+    check("no arguments prints the overview",
+          usage.fst == 0 && usage.snd.contains("Usage:") && usage.snd.contains("doctor")),
+    check("--version prints the name",
+          version.fst == 0 && str-starts-with(version.snd, "koki ")),
+    check("help prints the overview",
+          help.fst == 0 && help.snd.contains("Usage:")),
+    check("help prints a command's options",
+          help-add.fst == 0
+            && help-add.snd.contains("--attr")
+            && help-add.snd.contains("--library")),
+    check("help help prints its own help",
+          help-help.fst == 0 && help-help.snd.contains("koki help [COMMAND]")),
+    check("a typo is named and the nearest command suggested",
+          typo.fst == 2 && typo.snd.contains("no such command") && typo.snd.contains("build")),
+    check("a misspelt option is suggested",
+          bad-opt.fst == 2 && bad-opt.snd.contains("--name")),
+    check("new without a name is rejected",
+          new-noname.fst == 2 && new-noname.snd.contains("needs a name")),
+    check("add without a dependency is rejected",
+          add-none.fst == 2 && add-none.snd.contains("needs at least one dependency")),
+    check("remove without a dependency is rejected",
+          rm-none.fst == 2 && rm-none.snd.contains("needs at least one dependency")),
+    check("new writes a project",
+          new-bin.fst == 0 && project-file(d1, "demo/flake.nix")),
+    check("the new project's flake names it",
+          file-has(d1, "demo/flake.nix", "pname = \"demo\"")),
+    check("new writes the program module",
+          project-file(d1, "demo/main.kk")),
+    check("info describes the project",
+          info.fst == 0 && info.snd.contains("koka project") && info.snd.contains("demo")),
+    check("doctor reads the marker regions back",
+          doctor.snd.contains("flake.nix has the koki marker regions")),
+    check("the library template writes its module",
+          new-lib.fst == 0
+            && project-file(d2, "my-lib/src/my_lib.kk")
+            && project-file(d2, "my-lib/example.kk")),
+    check("an invalid project name is rejected",
+          bad-name.fst == 2 && !project-file(d3, "My App/flake.nix")),
+    check("an unknown template is rejected",
+          bad-kind.fst == 2 && bad-kind.snd.contains("unknown template")),
+    check("init refuses a non-empty directory",
+          non-empty.fst == 1 && non-empty.snd.contains("is not empty")),
+    check("a dry run writes nothing",
+          dry.fst == 0 && !project-file(d5, "app/flake.nix")),
+    check("doctor outside a project says so",
+          doctor-none.snd.contains("not inside a koki project")),
+  ]
+
 // ---------- runner ----------
 
 fun main() : io ()
   val rs = strutil-checks() ++ arg-checks() ++ term-checks ++ registry-checks()
              ++ template-checks() ++ model-checks() ++ remove-checks() ++ repl-checks()
+             ++ dispatch-checks()
   rs.foreach fn(r) {
     ((if r.ok then "ok    " else "FAIL  ") ++ r.name).println
   }

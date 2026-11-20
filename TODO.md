@@ -65,11 +65,6 @@ preserving the original ending, or mentioning it in the summary line.
 
 ## Testing gaps
 
-- **Nothing tests dispatch.** The argument-to-command mapping, the help text,
-  `doctor`'s report and the `init`/`add` file writing are all untested. The
-  `set-opt` bug — `koki new` skipping name validation — was found by hand and
-  would have been caught by a test that runs `new` and checks the result.
-  This is the largest gap in the suite.
 - **No end-to-end test that builds a generated project.** The templates are
   verified by hand, not by CI. A check that runs `koki init -t lib`, adds it to
   a scratch project as a `path:` input and builds would close the loop.

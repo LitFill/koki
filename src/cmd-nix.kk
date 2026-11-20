@@ -322,11 +322,10 @@ pub fun cmd-doctor(p : parsed) : io int
   val root = project-root()
   val proj = match root
     Nothing ->
-      [ advice("not inside a koki project", "run `koki init` to create one") ].render-checks
-      []
+      [ advice("not inside a koki project", "run `koki init` to create one") ]
     Just(r) ->
-      [ fine("project root: " ++ r.string) ].render-checks
-      project-checks(r)
+      [ fine("project root: " ++ r.string) ] ++ project-checks(r)
+  render-checks(proj)
 
   out-blank()
   val all  = tool ++ proj
