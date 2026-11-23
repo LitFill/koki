@@ -128,8 +128,12 @@ kokaLibsFor = pkgs: [
   # koki:libs:end
 ];
 
-kokaLibArgs = pkgs: ... map (d: "--include=${d}") (kokaLibsFor pkgs) ...;
-kokaJson   = pkgs: ... the same list, as koka.json ...;
+kokaLibArgs = pkgs: concatStringsSep " " (map (d: "--include=${d}") (kokaLibsFor pkgs));
+kokaJson   = pkgs:
+  let
+    dirs = concatStringsSep "," (map (d: "\"${d}\"") (kokaLibsFor pkgs));
+  in
+  ''{"include_dirs":[${dirs}]}'';
 ```
 
 There is no third place to update.

@@ -12,13 +12,16 @@
   outputs =
     { self, nixpkgs, ... }:
     let
+      inherit (nixpkgs.lib) genAttrs;
+      inherit (builtins) concatStringsSep elem;
+
       systems = [
         "x86_64-linux"
         "aarch64-linux"
         "x86_64-darwin"
         "aarch64-darwin"
       ];
-      forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system} system);
+      forAllSystems = f: genAttrs systems (system: f nixpkgs.legacyPackages.${system} system);
 
       baseVersion = "0.3.0";
 
@@ -39,13 +42,17 @@
       ];
 
       # `--include` flags for the compiler.
-      kokaLibArgs = pkgs: builtins.concatStringsSep " " (map (d: "--include=${d}") (kokaLibsFor pkgs));
+      kokaLibArgs = pkgs:
+        concatStringsSep " " (map (d: "--include=${d}") (kokaLibsFor pkgs));
 
       # The same list as a `koka.json` `include_dirs` array, which is what
       # editors and the Koka language server read.
       kokaJson =
         pkgs:
-        ''{"include_dirs":[${builtins.concatStringsSep "," (map (d: "\"${d}\"") (kokaLibsFor pkgs))}]}'';
+        let
+          dirs = concatStringsSep "," (map (d: "\"${d}\"") (kokaLibsFor pkgs));
+        in
+        ''{"include_dirs":[${dirs}]}'';
 
       # Shared by the package and the test check.
       kokiSrc =
@@ -54,7 +61,10 @@
           src = self;
           filter =
             path: type:
-            !(builtins.elem (baseNameOf (toString path)) [
+            let
+              base = baseNameOf (toString path);
+            in
+            !(elem base [
               "result"
               "koka.json"
               ".koka"
@@ -64,8 +74,13 @@
     in
     {
       packages = forAllSystems (
-        pkgs: system: {
-          default = pkgs.stdenv.mkDerivation {
+        pkgs: system:
+        let
+          inherit (pkgs.stdenv) mkDerivation;
+          inherit (pkgs.lib) licenses platforms;
+        in
+        {
+          default = mkDerivation {
             pname = "koki";
             version = fullVersion; # also exposed as `.version` / `lib.getVersion`
             src = kokiSrc pkgs;
@@ -100,19 +115,30 @@
                 dependency list, and hands the actual building to Nix.
               '';
               homepage = "https://github.com/LitFill/koki";
-              license = pkgs.lib.licenses.mit;
+              license = licenses.mit;
               mainProgram = "koki";
-              platforms = pkgs.lib.platforms.unix;
+              platforms = platforms.unix;
             };
           };
         }
       );
 
       apps = forAllSystems (
-        pkgs: system: {
+        pkgs: system:
+        let
+          inherit (pkgs.lib) licenses platforms;
+        in
+        {
           default = {
             type = "app";
             program = "${self.packages.${system}.default}/bin/koki";
+            meta = {
+              description = "koki — the Koka project manager";
+              homepage = "https://github.com/LitFill/koki";
+              license = licenses.mit;
+              mainProgram = "koki";
+              platforms = platforms.unix;
+            };
           };
         }
       );
@@ -120,7 +146,7 @@
       devShells = forAllSystems (
         pkgs: system: {
           default = pkgs.mkShell {
-            packages = [ pkgs.koka ];
+            packages = with pkgs; [ koka ];
             shellHook = "printf '%s\\n' '${kokaJson pkgs}' > \"$PWD/koka.json\"";
           };
         }
@@ -129,14 +155,18 @@
       # The test suite is a check rather than a separate target, so that a
       # regression fails `nix flake check` and therefore any CI running it.
       checks = forAllSystems (
-        pkgs: system: {
-          tests = pkgs.stdenv.mkDerivation {
+        pkgs: system:
+        let
+          inherit (pkgs.stdenv) mkDerivation;
+        in
+        {
+          tests = mkDerivation {
             pname = "koki-tests";
             version = baseVersion;
             src = kokiSrc pkgs;
-            nativeBuildInputs = [
-              pkgs.koka
-              pkgs.stdenv.cc
+            nativeBuildInputs = with pkgs; [
+              koka
+              stdenv.cc
             ];
             dontConfigure = true;
             dontInstall = true;

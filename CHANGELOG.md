@@ -18,6 +18,10 @@ the `baseVersion` in `flake.nix`.
   of always `koka-app`.
 - The global flags (`--quiet`, `--color`, `--no-color`, `--verbose`) work
   before the command name as well as after it.
+- Generated flakes use the same small Nix style as koki's own flake:
+  `inherit`, `let`, and a shared source filter. The app output now carries
+  `meta`, and the test check builds from the shared source filter. The
+  generated flakes use no experimental Nix syntax.
 - Errors and hints go to stderr, so `koki … 2>/dev/null` silences them.
 - `koki remove` accepts the name `koki info` shows: a dependency added as
   `path:../lib` can be removed as `lib`.

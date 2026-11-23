@@ -59,14 +59,16 @@ val flake-preamble : string = r#"
   outputs =
     { self, nixpkgs, ... }:
     let
+      inherit (nixpkgs.lib) genAttrs;
+      inherit (builtins) concatStringsSep elem;
+
       systems = [
         "x86_64-linux"
         "aarch64-linux"
         "x86_64-darwin"
         "aarch64-darwin"
       ];
-      forAllSystems = f:
-        nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system} system);
+      forAllSystems = f: genAttrs systems (system: f nixpkgs.legacyPackages.${system} system);
 
       # One Koka include directory per dependency. `koki add` writes the
       # lines between the markers below and `koki remove` takes them out;
@@ -79,24 +81,40 @@ val flake-preamble : string = r#"
 
       # `--include` flags for the compiler.
       kokaLibArgs = pkgs:
-        builtins.concatStringsSep " " (map (d: "--include=${d}") (kokaLibsFor pkgs));
+        concatStringsSep " " (map (d: "--include=${d}") (kokaLibsFor pkgs));
 
       # The same list as a `koka.json` `include_dirs` array, which is what
       # editors and the Koka language server read.
-      kokaJson = pkgs:
-        ''{"include_dirs":[${builtins.concatStringsSep "," (map (d: "\"${d}\"") (kokaLibsFor pkgs))}]}'';
+      kokaJson =
+        pkgs:
+        let
+          dirs = concatStringsSep "," (map (d: "\"${d}\"") (kokaLibsFor pkgs));
+        in
+        ''{"include_dirs":[${dirs}]}'';
+
+      # Shared by the package and the test check.
+      projectSrc =
+        pkgs:
+        pkgs.lib.cleanSourceWith {
+          src = self;
+          filter =
+            path: type:
+            let
+              base = baseNameOf (toString path);
+            in
+            !(elem base [
+              "result"
+              "koka.json"
+              ".koka"
+            ]);
+        };
     in
     {
 "#.remove-first-newline
 
 // Keep the interpreter output of generated sources out of the build.
 val src-filter : string = r#"
-          src = pkgs.lib.cleanSourceWith {
-            src = self;
-            filter = path: type:
-              let base = baseNameOf (toString path);
-              in !(builtins.elem base [ "result" "koka.json" ".koka" ]);
-          };
+            src = projectSrc pkgs;
 "#.remove-first-newline
 
 val gitignore : string = r#"
@@ -142,46 +160,69 @@ SOFTWARE.
 // ---------- per-kind templates ----------
 
 val bin-flake : string = flake-preamble ++ r#"
-      packages = forAllSystems (pkgs: system: {
-        default = pkgs.stdenv.mkDerivation {
-          pname = "{{name}}";
-          version = "{{version}}";
+      packages = forAllSystems (
+        pkgs: system:
+        let
+          inherit (pkgs.stdenv) mkDerivation;
+          inherit (pkgs.lib) platforms;
+        in
+        {
+          default = mkDerivation {
+            pname = "{{name}}";
+            version = "{{version}}";
 "# ++ src-filter ++ r#"
-          nativeBuildInputs = [ pkgs.koka pkgs.stdenv.cc ];
+            nativeBuildInputs = with pkgs; [
+              koka
+              stdenv.cc
+            ];
 
-          buildPhase = ''
-            runHook preBuild
-            koka -o {{name}} ${kokaLibArgs pkgs} main.kk
-            runHook postBuild
-          '';
+            buildPhase = ''
+              runHook preBuild
+              koka -o {{name}} ${kokaLibArgs pkgs} main.kk
+              runHook postBuild
+            '';
 
-          installPhase = ''
-            runHook preInstall
-            install -Dm755 {{name}} $out/bin/{{name}}
-            runHook postInstall
-          '';
+            installPhase = ''
+              runHook preInstall
+              install -Dm755 {{name}} $out/bin/{{name}}
+              runHook postInstall
+            '';
 
-          meta = {
-            description = "{{desc}}";
-            mainProgram = "{{name}}";
-            platforms = pkgs.lib.platforms.unix;
+            meta = {
+              description = "{{desc}}";
+              mainProgram = "{{name}}";
+              platforms = platforms.unix;
+            };
           };
-        };
-      });
+        }
+      );
 
-      apps = forAllSystems (pkgs: system: {
-        default = {
-          type = "app";
-          program = "${self.packages.${system}.default}/bin/{{name}}";
-        };
-      });
+      apps = forAllSystems (
+        pkgs: system:
+        let
+          inherit (pkgs.lib) platforms;
+        in
+        {
+          default = {
+            type = "app";
+            program = "${self.packages.${system}.default}/bin/{{name}}";
+            meta = {
+              description = "{{desc}}";
+              mainProgram = "{{name}}";
+              platforms = platforms.unix;
+            };
+          };
+        }
+      );
 
-      devShells = forAllSystems (pkgs: system: {
-        default = pkgs.mkShell {
-          packages = [ pkgs.koka ];
-          shellHook = "printf '%s\\n' '${kokaJson pkgs}' > \"$PWD/koka.json\"";
-        };
-      });
+      devShells = forAllSystems (
+        pkgs: system: {
+          default = pkgs.mkShell {
+            packages = with pkgs; [ koka ];
+            shellHook = "printf '%s\\n' '${kokaJson pkgs}' > \"$PWD/koka.json\"";
+          };
+        }
+      );
 
       checks = forAllSystems (pkgs: system: {
         build = self.packages.${system}.default;
@@ -191,100 +232,142 @@ val bin-flake : string = flake-preamble ++ r#"
 "#.remove-first-newline
 
 val test-flake : string = flake-preamble ++ r#"
-      packages = forAllSystems (pkgs: system: {
-        default = pkgs.stdenv.mkDerivation {
-          pname = "{{name}}";
-          version = "{{version}}";
+      packages = forAllSystems (
+        pkgs: system:
+        let
+          inherit (pkgs.stdenv) mkDerivation;
+          inherit (pkgs.lib) platforms;
+        in
+        {
+          default = mkDerivation {
+            pname = "{{name}}";
+            version = "{{version}}";
 "# ++ src-filter ++ r#"
-          nativeBuildInputs = [ pkgs.koka pkgs.stdenv.cc ];
+            nativeBuildInputs = with pkgs; [
+              koka
+              stdenv.cc
+            ];
 
-          buildPhase = ''
-            runHook preBuild
-            koka -o {{name}} ${kokaLibArgs pkgs} main.kk
-            runHook postBuild
-          '';
+            buildPhase = ''
+              runHook preBuild
+              koka -o {{name}} ${kokaLibArgs pkgs} main.kk
+              runHook postBuild
+            '';
 
-          installPhase = ''
-            runHook preInstall
-            install -Dm755 {{name}} $out/bin/{{name}}
-            runHook postInstall
-          '';
+            installPhase = ''
+              runHook preInstall
+              install -Dm755 {{name}} $out/bin/{{name}}
+              runHook postInstall
+            '';
 
-          meta = {
-            description = "{{desc}}";
-            mainProgram = "{{name}}";
-            platforms = pkgs.lib.platforms.unix;
+            meta = {
+              description = "{{desc}}";
+              mainProgram = "{{name}}";
+              platforms = platforms.unix;
+            };
           };
-        };
-      });
+        }
+      );
 
-      apps = forAllSystems (pkgs: system: {
-        default = {
-          type = "app";
-          program = "${self.packages.${system}.default}/bin/{{name}}";
-        };
-      });
+      apps = forAllSystems (
+        pkgs: system:
+        let
+          inherit (pkgs.lib) platforms;
+        in
+        {
+          default = {
+            type = "app";
+            program = "${self.packages.${system}.default}/bin/{{name}}";
+            meta = {
+              description = "{{desc}}";
+              mainProgram = "{{name}}";
+              platforms = platforms.unix;
+            };
+          };
+        }
+      );
 
-      devShells = forAllSystems (pkgs: system: {
-        default = pkgs.mkShell {
-          packages = [ pkgs.koka ];
-          shellHook = "printf '%s\\n' '${kokaJson pkgs}' > \"$PWD/koka.json\"";
-        };
-      });
+      devShells = forAllSystems (
+        pkgs: system: {
+          default = pkgs.mkShell {
+            packages = with pkgs; [ koka ];
+            shellHook = "printf '%s\\n' '${kokaJson pkgs}' > \"$PWD/koka.json\"";
+          };
+        }
+      );
 
       # `koki check` runs these. A test that stops making the build fail is a
       # test that has stopped being a test.
-      checks = forAllSystems (pkgs: system: {
-        tests = pkgs.stdenv.mkDerivation {
-          pname = "{{name}}-tests";
-          version = "{{version}}";
-          src = self;
-          nativeBuildInputs = [ pkgs.koka pkgs.stdenv.cc ];
-          dontConfigure = true;
-          dontInstall = true;
+      checks = forAllSystems (
+        pkgs: system:
+        let
+          inherit (pkgs.stdenv) mkDerivation;
+        in
+        {
+          tests = mkDerivation {
+            pname = "{{name}}-tests";
+            version = "{{version}}";
+            src = projectSrc pkgs;
+            nativeBuildInputs = with pkgs; [
+              koka
+              stdenv.cc
+            ];
+            dontConfigure = true;
+            dontInstall = true;
 
-          buildPhase = ''
-            runHook preBuild
-            koka ${kokaLibArgs pkgs} -o test-bin test/test.kk
-            ./test-bin
-            runHook postBuild
-            touch $out
-          '';
-        };
-      });
+            buildPhase = ''
+              runHook preBuild
+              koka ${kokaLibArgs pkgs} -o test-bin test/test.kk
+              ./test-bin
+              runHook postBuild
+              touch $out
+            '';
+          };
+        }
+      );
     };
 }
 "#.remove-first-newline
 
 val lib-flake : string = flake-preamble ++ r#"
-      packages = forAllSystems (pkgs: system: {
-        default = pkgs.stdenv.mkDerivation {
-          pname = "{{name}}";
-          version = "{{version}}";
+      packages = forAllSystems (
+        pkgs: system:
+        let
+          inherit (pkgs.stdenv) mkDerivation;
+          inherit (pkgs.lib) platforms;
+        in
+        {
+          default = mkDerivation {
+            pname = "{{name}}";
+            version = "{{version}}";
 "# ++ src-filter ++ r#"
-          nativeBuildInputs = [ pkgs.koka pkgs.stdenv.cc ];
+            nativeBuildInputs = with pkgs; [
+              koka
+              stdenv.cc
+            ];
 
-          buildPhase = ''
-            runHook preBuild
-            koka -l --output={{module}} --builddir="$PWD/.koka-build" src/{{module}}.kk
-            runHook postBuild
-          '';
+            buildPhase = ''
+              runHook preBuild
+              koka -l --output={{module}} --builddir="$PWD/.koka-build" src/{{module}}.kk
+              runHook postBuild
+            '';
 
-          # A Koka library is its source: consumers resolve it with
-          # `--include=<includePath>` and compile against these modules.
-          installPhase = ''
-            runHook preInstall
-            install -Dm644 src/{{module}}.kk \
-              $out/share/koka/${pkgs.koka.version}/{{module}}.kk
-            runHook postInstall
-          '';
+            # A Koka library is its source: consumers resolve it with
+            # `--include=<includePath>` and compile against these modules.
+            installPhase = ''
+              runHook preInstall
+              install -Dm644 src/{{module}}.kk \
+                $out/share/koka/${pkgs.koka.version}/{{module}}.kk
+              runHook postInstall
+            '';
 
-          meta = {
-            description = "{{desc}}";
-            platforms = pkgs.lib.platforms.unix;
+            meta = {
+              description = "{{desc}}";
+              platforms = platforms.unix;
+            };
           };
-        };
-      });
+        }
+      );
 
       # How a consuming flake reaches this library. `koki add` writes
       # `self.inputs.<input>.kokaLibraries.<system>.{{module}}.includePath`
@@ -298,12 +381,14 @@ val lib-flake : string = flake-preamble ++ r#"
         };
       });
 
-      devShells = forAllSystems (pkgs: system: {
-        default = pkgs.mkShell {
-          packages = [ pkgs.koka ];
-          shellHook = "printf '%s\\n' '${kokaJson pkgs}' > \"$PWD/koka.json\"";
-        };
-      });
+      devShells = forAllSystems (
+        pkgs: system: {
+          default = pkgs.mkShell {
+            packages = with pkgs; [ koka ];
+            shellHook = "printf '%s\\n' '${kokaJson pkgs}' > \"$PWD/koka.json\"";
+          };
+        }
+      );
 
       checks = forAllSystems (pkgs: system: {
         build = self.packages.${system}.default;
