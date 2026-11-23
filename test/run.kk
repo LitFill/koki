@@ -246,6 +246,23 @@ fun template-checks() : div list<result>
           template-files(demo-lib).any fn(f) f.path == "src/demo_lib.kk"),
     check("the test template writes a test module",
           template-files(demo-test).any fn(f) f.path == "test/test.kk"),
+    // The generated flake uses the same small helper style as koki's own
+    // flake: `inherit`, pipelines, and one `let` around each output.
+    check("the flake uses inherit helpers",
+          render-flake(demo).contains("inherit (nixpkgs.lib) genAttrs;")
+            && render-flake(demo).contains("inherit (builtins) concatStringsSep elem;")),
+    check("the flake avoids experimental pipe operators",
+          !render-flake(demo).contains("|>")
+            && !render-flake(demo).contains("<|")
+            && render-flake(demo).contains("concatStringsSep")),
+    check("the package uses mkDerivation from a let",
+          render-flake(demo).contains("let\n          inherit (pkgs.stdenv) mkDerivation;")),
+    check("the app has metadata",
+          render-flake(demo).contains("meta = {")
+            && render-flake(demo).contains("mainProgram = \"demo-app\";")),
+    check("the source filter is shared",
+          render-flake(demo).contains("projectSrc =")
+            && render-flake(demo).contains("src = projectSrc pkgs;")),
   ]
 
 // ---------- the flake model ----------
