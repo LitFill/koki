@@ -597,6 +597,58 @@ fun dispatch-checks() : io list<result>
   // Doctor has somewhere to stand and no project to stand in.
   val doctor-none = koki-in(bin, d0, "doctor")
 
+  // ---------- koka project detection and merge ----------
+  //
+  // Three scenarios: a bare koka project (main.kk only), a koka project
+  // with its own flake.nix, and an empty directory that is not a koka project.
+
+  // A: bare koka project — main.kk exists, no flake.nix.
+  val d9 = scratch-dir()
+  match try fn() { (d9 ++ "/bare").path.ensure-dir }
+    Ok(_)    -> ()
+    Error(_) -> ()
+  match try fn() { (d9 ++ "/bare/main.kk").path.write-text-file("fun main() { println(\"hello\") }") }
+    Ok(_)    -> ()
+    Error(_) -> ()
+  val koka-bare = koki-in(bin, d9, "init --yes --no-git --merge bare")
+  val koka-bare-flake  = project-file(d9, "bare/flake.nix")
+  val koka-bare-source = file-has(d9, "bare/main.kk", "hello")
+
+  // B: koka project with its own flake.nix — source is preserved under --merge.
+  val d10 = scratch-dir()
+  match try fn() { (d10 ++ "/withflake/src").path.ensure-dir }
+    Ok(_)    -> ()
+    Error(_) -> ()
+  match try fn() { (d10 ++ "/withflake/src/app.kk").path.write-text-file("module app\n\nfun main() { println(\"old\") }") }
+    Ok(_)    -> ()
+    Error(_) -> ()
+  match try fn() { (d10 ++ "/withflake/flake.nix").path.write-text-file("{ description = \"my koka app\"; }") }
+    Ok(_)    -> ()
+    Error(_) -> ()
+  val koka-withflake = koki-in(bin, d10, "init --yes --no-git --merge --name my-app withflake")
+  val koka-withflake-flake   = project-file(d10, "withflake/flake.nix")
+  val koka-withflake-preserved = file-has(d10, "withflake/src/app.kk", "old")
+
+  // C: an empty directory is not a koka project; --merge is irrelevant.
+  val d11 = scratch-dir()
+  val koka-empty-merge = koki-in(bin, d11, "init --yes --no-git --merge fresh-app")
+  val koka-empty-flake = project-file(d11, "fresh-app/flake.nix")
+  val koka-empty-main  = project-file(d11, "fresh-app/main.kk")
+
+  // D: a koka project without --merge is refused, not silently overwritten.
+  val d12 = scratch-dir()
+  match try fn() { (d12 ++ "/kept/src").path.ensure-dir }
+    Ok(_)    -> ()
+    Error(_) -> ()
+  match try fn() { (d12 ++ "/kept/src/app.kk").path.write-text-file("module app\n\nfun main() { println(\"old\") }") }
+    Ok(_)    -> ()
+    Error(_) -> ()
+  val koka-refuse = koki-in(bin, d12, "init --yes --no-git kept")
+  val koka-refuse-kept = file-has(d12, "kept/src/app.kk", "old")
+
+  // --merge in help output.
+  val help-init = koki-in(bin, d0, "help init")
+
   [
     check("no arguments prints the overview",
           usage.fst == 0 && usage.snd.contains("Usage:") && usage.snd.contains("doctor")),
@@ -667,6 +719,24 @@ fun dispatch-checks() : io list<result>
     check("init names the project after its directory",
           init-named.fst == 0
             && file-has(d8, "nameit/flake.nix", "pname = \"nameit\"")),
+
+    // ---------- koka project detection ----------
+    check("init in a bare koka project writes the flake",
+          koka-bare.fst == 0 && koka-bare-flake),
+    check("init --merge in a bare koka project preserves source",
+          koka-bare-source),
+    check("init in a koka project with a flake writes a koki flake",
+          koka-withflake.fst == 0 && koka-withflake-flake),
+    check("init --merge in a koka project with a flake preserves source",
+          koka-withflake-preserved),
+    check("init --merge in an empty directory writes everything",
+          koka-empty-merge.fst == 0 && koka-empty-flake && koka-empty-main),
+    check("init in a koka project without --merge is refused",
+          koka-refuse.fst == 1
+            && koka-refuse.snd.contains("--merge")
+            && koka-refuse-kept),
+    check("help init documents --merge",
+          help-init.fst == 0 && help-init.snd.contains("--merge")),
   ]
 
 // ---------- runner ----------

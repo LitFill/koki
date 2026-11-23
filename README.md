@@ -65,6 +65,24 @@ All three write a `flake.nix` that builds on Linux and macOS, on x86-64 and
 aarch64, with a dev shell that regenerates `koka.json` so editors and the Koka
 language server see the same modules the compiler will.
 
+## Adding koki to an existing project
+
+`koki init` in a directory that already holds Koka code asks for `--merge`:
+
+```console
+$ koki init --merge src/mylib
+→ src/mylib looks like a koka project; adding koki files
+→ merging into src/mylib (source files preserved)
+  keep    main.kk (existing)
+  create  flake.nix
+  …
+```
+
+`--merge` writes the support files (the flake, `.gitignore`, `README.md`,
+`LICENSE`) and leaves the project's own `main.kk`, `example.kk`,
+`test/test.kk` and `src/<name>.kk` alone. Without it the command refuses
+rather than overwrite; `--force` overwrites everything.
+
 ## Interactive
 
 `koki init`, `koki new`, `koki add` and `koki remove` ask for what you did not

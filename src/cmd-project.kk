@@ -34,6 +34,87 @@ fun this-year() : io string
     Ok(s)    -> last(s.str-lines).default("")
     Error(_) -> "2026"
 
+// ---------- koka detection ----------
+
+// A Koka project, before koki touches it. Any one of these says the directory
+// already holds Koka code that `koki init` must not clobber blindly:
+//   - a .kk source file anywhere inside (covers src/, test/, root, etc.)
+//   - a koka.json (the dev shell's include path)
+//   - a flake.nix that mentions koka (koka build input, koka in a package name)
+fun is-koka-project(p : path) : io bool
+  if is-file(p / "koka.json") then return True
+  if has-koka-flake(p / "flake.nix") then return True
+  has-kk-file(p)
+
+// Does this flake.nix mention Koka? A non-existent file is simply not a koka
+// flake; an unreadable one is not either — the caller handles the read error.
+fun has-koka-flake(p : path) : io bool
+  match try fn() { p.read-text-file }
+    Ok(s)    -> s.contains("koka")
+    Error(_) -> False
+
+// Does the directory tree contain at least one .kk source file?
+fun has-kk-file(p : path) : io bool
+  match try fn() { list-directory(p) }
+    Error(_) -> False
+    Ok(entries) ->
+      entries.any fn(e) { entry-is-kk(e) }
+
+// A single directory entry is a .kk file, or a directory that contains one.
+fun entry-is-kk(e : path) : io bool
+  if e.is-file && e.string.str-ends-with(".kk") then return True
+  if !e.is-directory then return False
+  has-kk-file(e)
+
+// Which files to skip when `--merge` is active and the target is a koka
+// project. Skipping means "leave the user's copy alone"; every other template
+// file (flake.nix, .gitignore, README.md, …) is still written.
+fun skip-patterns() : list<string>
+  [ "main.kk", "example.kk", "test/test.kk" ]
+
+// The module path koki's lib template would generate.
+fun lib-module-path(name : string) : string
+  "src/" ++ str-snake(name) ++ ".kk"
+
+// Should this file be preserved during a merge? Returns True to skip (keep the
+// user's existing copy). A template path is either in the fixed skip list or
+// matches the library module for this project's name.
+fun should-skip-merge(f : newfile, name : string) : bool
+  if skip-patterns().contains(f.path) then return True
+  f.path == lib-module-path(name)
+
+// Report the template files a merge leaves alone. Each one is a file the user
+// already owns (see should-skip-merge), so it is kept rather than overwritten.
+fun out-kept(files : list<newfile>) : io ()
+  match files
+    Nil -> ()
+    Cons(f, tl) ->
+      out-item("keep    " ++ f.path ++ " (existing)")
+      out-kept(tl)
+
+// The `koki init` decision after the arguments are parsed: whether the target
+// is an existing koka project and how to handle the template files.
+//
+//   KokaEmpty        — nothing there; write everything
+//   KokaMerge        — a koka project with no flake.nix; write only support files
+//   KokaOverwrite    — a koka project with a flake.nix; merge/skip source files
+pub type koka-state
+  KokaEmpty
+  KokaMerge
+  KokaOverwrite
+
+// Classify the target directory.
+fun classify-koka(root : path) : io koka-state
+  if !is-koka-project(root) then return KokaEmpty
+  if is-file(root / "flake.nix") then KokaOverwrite else KokaMerge
+
+// Is this state the "no koka project" case? Named to avoid needing (==) on
+// the koka-state type, which Koka does not derive.
+fun is-empty-koka(s : koka-state) : bool
+  match s
+    KokaEmpty -> True
+    _         -> False
+
 // ---------- init ----------
 
 pub val init-args : list<argdef> = [
@@ -46,6 +127,7 @@ pub val init-args : list<argdef> = [
 
   arg-switch("yes",     "y", "take every default without asking"),
   arg-switch("force",   "f", "overwrite files that already exist"),
+  arg-switch("merge",   "",  "keep existing source files when initialising in a koka project"),
   arg-switch("git",     "",  "run `git init` (default: yes; --no-git to skip)"),
   arg-switch("dry-run", "",  "print what would be created, write nothing"),
 ]
@@ -150,10 +232,28 @@ pub fun cmd-init(p : parsed) : io int
     return 2
 
   val dry = p.has("dry-run")
-  if !dry && safe-dir(root) && !p.has("force") && non-empty-dir(root) then
-    out-error(root.string ++ " is not empty")
-    out-hint("pass --force to write into it anyway, or name another directory")
+  val state = classify-koka(root)
+  val merge = p.has("merge") && !is-empty-koka(state)
+  // Writing into a directory that already holds files needs `--force`. A koka
+  // project is the case worth naming: its source files would be clobbered, and
+  // `--merge` is what preserves them.
+  val occupied = safe-dir(root) && non-empty-dir(root)
+  if !dry && occupied && !p.has("force") && !merge then
+    if is-empty-koka(state) then
+      out-error(root.string ++ " is not empty")
+      out-hint("pass --force to write into it anyway, or name another directory")
+    else
+      out-error(root.string ++ " already holds a koka project")
+      out-hint("pass --merge to keep its source files, or --force to overwrite them")
     return 1
+
+  if merge then
+    match state
+      KokaMerge ->
+        out-step(root.string ++ " looks like a koka project; adding koki files")
+      KokaOverwrite ->
+        out-step(root.string ++ " looks like a koki-managed koka project; refreshing")
+      KokaEmpty -> ()
 
   if !dry then
     match try({ root.ensure-dir })
@@ -164,13 +264,24 @@ pub fun cmd-init(p : parsed) : io int
 
   val s = Settings(name, a.desc, a.version, a.author, a.license, this-year(), kind)
   val files = template-files(s)
-  out-step("creating a %1 project in %2"%^[kind, root.string])
-  if !emit-all(root, files, dry) then return 1
+  // With `--merge` in a koka project the template's source files would clobber
+  // the user's own, so keep those and write everything else (flake.nix,
+  // .gitignore, …). Without merge — an empty directory — every file is written.
+  val kept = if merge then files.filter(fn(f) should-skip-merge(f, name)) else []
+  val files-to-write = if merge then files.filter(fn(f) !should-skip-merge(f, name)) else files
+  if merge then
+    out-step("merging into " ++ root.string ++ " (source files preserved)")
+  else
+    out-step("creating a %1 project in %2"%^[kind, root.string])
+  out-kept(kept)
+  if !emit-all(root, files-to-write, dry) then return 1
   if dry then
     out-ok("dry run: nothing was written")
     return 0
 
-  val git = init-git(root, files, flag-on(p, "git", True))
+  // Stage exactly the files koki wrote, so that Nix can see them without
+  // pulling in whatever else the directory holds.
+  val git = init-git(root, files-to-write, flag-on(p, "git", True))
   out-ok("created %1 (%2)"%^[bold(name), kind])
   // The commit step only makes sense when a repository exists and its files
   // are staged; a failed `git init` must not leave a `git commit` hint behind.

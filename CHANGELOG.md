@@ -4,6 +4,19 @@ All notable changes to koki. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the version is
 the `baseVersion` in `flake.nix`.
 
+## Unreleased
+
+### Added
+
+- `koki init --merge` adds koki to a directory that already holds Koka code:
+  it writes the flake and the support files and keeps the project's own
+  `main.kk`, `example.kk`, `test/test.kk` and `src/<name>.kk`.
+
+### Changed
+
+- `koki init` in a Koka project without `--merge` or `--force` now refuses
+  instead of overwriting the source files; the hint names `--merge`.
+
 ## 0.3.0 — 2026-11-21
 
 ### Added
