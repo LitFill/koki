@@ -23,7 +23,7 @@
       ];
       forAllSystems = f: genAttrs systems (system: f nixpkgs.legacyPackages.${system} system);
 
-      baseVersion = "0.3.0";
+      baseVersion = "0.4.0";
 
       revision = self.shortRev or self.dirtyShortRev or null;
 
